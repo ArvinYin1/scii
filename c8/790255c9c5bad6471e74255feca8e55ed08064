@@ -1,0 +1,68 @@
+.gitignore
+  h_2c300d828a9722 1-5
+README.md
+  h_2c300d828a9722 1-100
+analysis/ANALYSIS.md
+  h_2c300d828a9722 1-279
+analysis/README.md
+  h_2c300d828a9722 1-44
+analysis/ascii2.py
+  h_2c300d828a9722 1-31
+analysis/ascii_dump.py
+  h_2c300d828a9722 1-31
+analysis/cells.py
+  h_2c300d828a9722 1-26
+analysis/colors2.py
+  h_2c300d828a9722 1-37
+analysis/colors3.py
+  h_2c300d828a9722 1-35
+analysis/colors4.py
+  h_2c300d828a9722 1-25
+analysis/design-spec.md
+  h_2c300d828a9722 1-58
+analysis/field_test.py
+  h_2c300d828a9722 1-64
+analysis/fish_dump.py
+  h_2c300d828a9722 1-59
+analysis/fish_shapes.py
+  h_2c300d828a9722 1-48
+analysis/grid_extract.py
+  h_2c300d828a9722 1-28
+analysis/gridlines2.py
+  h_2c300d828a9722 1-24
+analysis/gridprecise.py
+  h_2c300d828a9722 1-19
+analysis/interior_test.py
+  h_2c300d828a9722 1-71
+analysis/measure.py
+  h_2c300d828a9722 1-41
+analysis/overlay.py
+  h_2c300d828a9722 1-18
+analysis/overlay2.py
+  h_2c300d828a9722 1-12
+analysis/photo_test.py
+  h_2c300d828a9722 1-92
+analysis/rot_test.py
+  h_2c300d828a9722 1-67
+analysis/sprite_extract.py
+  h_2c300d828a9722 1-66
+bloom/index.html
+  h_2c300d828a9722 1-649
+demo/ascii-principle.html
+  h_2c300d828a9722 1-1034
+demo/jelly-ascii.html
+  h_2c300d828a9722 1-401
+replica/shoal.html
+  h_2c300d828a9722 1-584
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.6",
+  "base_commit_sha": "c8790255c9c5bad6471e74255feca8e55ed08064",
+  "prompts": {},
+  "humans": {
+    "h_2c300d828a9722": {
+      "author": "Arvin <157796620+ArvinYin1@users.noreply.github.com>"
+    }
+  }
+}
