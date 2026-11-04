@@ -1,0 +1,401 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>水母 ASCII 渲染 · 最小可读版</title>
+<!--
+  =====================================================================
+  这套 demo 提取自 kurage-dashboard 的 Ocean 模块，砍掉了水母自身的解剖细节
+  （钟体收缩曲线、触手物理、生殖腺、指针互动、打字反馈、色彩过渡…），
+  只留下「程序化形状 → 字符网格」这条主干。
+
+  整个流程只有六步，代码里用 ①②③④⑤⑥ 标出来了：
+
+    ① 画布分层：主画布（字符）+ 极小离屏画布（数据）
+    ② 画场：用程序化形状往离屏画布上"画"，但画的是数据不是图像
+    ③ 降采样：2×2 超采样求平均，一格一个采样点
+    ④ 解码：把 RGB 三通道还原成「亮度 / 色相 / 白度」三路信号
+    ⑤ 查表：亮度 → 字符档位（每档两个字，哈希二选一消除断层）
+    ⑥ 上屏：先铺一层着色方块，再把字符叠上去
+
+  想调参数看这两处：
+    PALETTE  —— 两个主色，所有颜色都是它们之间的插值
+    RAMP     —— 12 档字符斜坡，从最疏到最密
+  =====================================================================
+-->
+<style>
+  html, body { margin: 0; height: 100%; background: #05070b; overflow: hidden; }
+  canvas { display: block; width: 100%; height: 100%; }
+</style>
+</head>
+<body>
+<canvas id="stage"></canvas>
+
+<script>
+(() => {
+'use strict';
+
+/* ===================== 常量：想改风格改这里 ========================= */
+
+// 两个主色 [R,G,B]，水母的色相就在这两者之间插值
+const PALETTE = {
+  a: [92, 226, 240],   // 青
+  b: [164, 140, 255],  // 紫
+};
+
+// 字符斜坡：12 档，从「最疏」到「最密」。每档两个字，靠哈希二选一。
+// 这是消除色阶断层的关键——单字一档会看出明显的台阶。
+const RAMP = [
+  ['.', ','], ["'", '`'], [':', "'"], [';', ':'],
+  ['o', ';'], ['t', 'o'], ['%', 't'], ['S', '%'],
+  ['X', 'S'], ['8', 'X'], ['@', '8'], ['#', '@'],
+];
+
+// 零星彩色高光的候选色（偶尔出现在中等亮度的格子上，制造"闪光"）
+const ACCENTS = ['#f9a8d4', '#fcd34d', '#86efac', '#c4b5fd'];
+
+const FONT = 'ui-monospace, "SF Mono", Menlo, Consolas, monospace';
+const SS = 2;            // 每格每轴采样数。2 = 每格 4 个采样点
+const MAX_FPS = 30;      // 硬锁帧率，这是性能的主要保障
+
+/* ===================== ① 画布分层 ================================== */
+
+const canvas = document.getElementById('stage');
+const ctx = canvas.getContext('2d');
+
+// 离屏画布极小：宽度 = 列数 × SS，高度 = 行数 × SS
+const off = document.createElement('canvas');
+const octx = off.getContext('2d', { willReadFrequently: true });
+
+let W = 0, H = 0, dpr = 1;
+let cw = 11, ch = 16;        // 一格多少 CSS 像素
+let cols = 0, rows = 0;      // 网格尺寸
+let ow = 0, oh = 0;          // 离屏画布尺寸（像素）
+let fs = 12;                 // 字号
+
+let time = 0, last = 0, acc = 0, raf = 0;
+let playing = !window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+/* ===================== ③ 降采样用的辅助 ============================ */
+
+// 字符不是正方形！等宽字体的宽高比约 0.6~0.7 : 1。
+// 这个比例算错，画面会被横向压扁——最常见的第一个坑。
+function measureCell() {
+  ctx.font = `500 ${fs}px ${FONT}`;
+  const w = ctx.measureText('M').width;   // 等宽字体量一个字符就是字宽
+  cw = Math.ceil(w * 1.02);
+  ch = Math.ceil(fs * 1.35);              // 行高 = 字号的 1.35 倍左右
+}
+
+/* ===================== ② 画场：编码进通道 ========================== */
+
+/*
+  col(m, k, w) 是整个技法的心脏。
+
+  离屏画布不是"图片"，是"数据容器"。它把两个互相独立的值
+  塞进 R 和 B 两个通道：
+
+      R = (1 − m) · k      冷色分量
+      B = m · k            暖色分量
+      G = w                白度 / 高光量
+
+  为什么要这么绕？因为下面要用 'lighter'（加法）混合。
+  加法会把颜色糊在一起，但 R 和 B 分开累加之后仍然能还原：
+
+      R + B = k            总强度 → 决定亮度
+      B / (R + B) = m      混合比 → 决定色相
+
+  于是「亮度」和「色相」两个正交的量，一起扛住了加法混合。
+*/
+function col(m, k, w) {
+  const r = Math.min(255, (1 - m) * k * 255) | 0;
+  const g = Math.min(255, w * 255) | 0;
+  const b = Math.min(255, m * k * 255) | 0;
+  return `rgb(${r},${g},${b})`;
+}
+
+/* --------------------- 简化版水母（只要形状） ---------------------- */
+
+let jellies = [];
+
+function makeJelly(i) {
+  return {
+    x: (0.12 + 0.76 * Math.random()) * cols,
+    y: (0.08 + 0.84 * ((i + 0.5) / 3 + Math.random() * 0.3)) * rows,
+    z: 0.45 + Math.random() * 0.55,        // 深度 0..1，越大越近越大
+    hue: i % 2,                            // 0 = 偏色 a，1 = 偏色 b
+    R: 6.5 + Math.random() * 4.5,          // 半径（单位：格）
+    phase: Math.random() * Math.PI * 2,    // 收缩相位
+    speed: 0.15 + Math.random() * 0.2,     // 漂浮速度（格/秒）
+  };
+}
+
+function drawField() {
+  // --- 清成纯黑，这一步必须在 reset transform 之后
+  octx.setTransform(1, 0, 0, 1, 0, 0);
+  octx.globalCompositeOperation = 'source-over';
+  octx.fillStyle = '#000';
+  octx.fillRect(0, 0, ow, oh);
+
+  // --- 关键：把坐标系改成「以格为单位」。1 单位 = 1 格。
+  //     这样下面写形状时不用关心像素，直接按格子思考。
+  //
+  //     注意这里的缩放是 SS 而不是原版的 SS/cw：
+  //     原版在「CSS 像素」空间画图，所以要把 1px 换算成 SS/cw 个离屏像素；
+  //     我们改在「格」空间画图，1 格正好对应 SS 个离屏像素。
+  octx.setTransform(SS, 0, 0, SS, 0, 0);
+  octx.globalCompositeOperation = 'lighter';   // 加法混合，信号可以叠
+  octx.lineCap = 'round';
+  octx.lineJoin = 'round';
+
+  for (const j of jellies) {
+    // 钟体收缩：c 在 0..1 之间起伏，制造"呼吸"
+    const c = 0.5 + 0.5 * Math.sin(time * 1.6 + j.phase);
+    const k = 0.95 + 0.65 * j.z;             // 越近越亮（>1 会被 col() 夹住）
+    const m = j.hue;                          // 0 用 a 色，1 用 b 色
+
+    const rx = j.R * (1 - 0.17 * c);          // 收缩时变窄
+    const ry = j.R * 0.62 * (1 + 0.10 * c);   // 同时变高
+
+    octx.save();
+    octx.translate(j.x, j.y);
+
+    // ---- 触手：几条往下垂的波浪线
+    for (let t = 0; t < 5; t++) {
+      const ox0 = (t - 2) * rx * 0.42;
+      octx.beginPath();
+      octx.moveTo(ox0, 0);
+      for (let s = 1; s <= 5; s++) {
+        const p = s / 5;
+        const sway = Math.sin(time * 1.1 + j.phase + t + p * 2.2) * p * rx * 0.30;
+        octx.lineTo(ox0 + sway, p * ry * 1.7);
+      }
+      // 一整条触手一次画完；透明度靠整体调低来"变淡"
+      octx.lineWidth = Math.max(0.30, j.R * 0.085);
+      octx.strokeStyle = col(m, k * 0.40, 0);
+      octx.stroke();
+    }
+
+    // ---- 钟体：一个上圆下凹的封闭路径 + 径向渐变
+    octx.beginPath();
+    octx.moveTo(-rx, 0);
+    octx.bezierCurveTo(-rx, -ry * 0.58, -rx * 0.56, -ry, 0, -ry);
+    octx.bezierCurveTo(rx * 0.56, -ry, rx, -ry * 0.58, rx, 0);
+    octx.quadraticCurveTo(0, -ry * 0.20, -rx, 0);   // 下缘往里凹
+    octx.closePath();
+
+    const g = octx.createRadialGradient(0, -ry * 0.38, rx * 0.10,
+                                        0, -ry * 0.30, rx * 1.05);
+    g.addColorStop(0.0, col(m, k * 0.52, 0.12 * k));  // 中心：中等亮度，带一点白
+    g.addColorStop(0.7, col(m, k * 0.64, 0.04 * k));  // 中段
+    g.addColorStop(1.0, col(m, k * 1.00, 0.10 * k));  // 边缘最亮 → 形成一道"环"
+    octx.fillStyle = g;
+    octx.fill();
+
+    // 描边让轮廓更清楚，字符化之后轮廓才有形
+    octx.lineWidth = Math.max(0.5, j.R * 0.09);
+    octx.strokeStyle = col(m, k * 0.85, 0.22 * k);
+    octx.stroke();
+
+    octx.restore();
+  }
+}
+
+/* ===================== ④ 解码 + ⑤ 查表 + ⑥ 上屏 ==================== */
+
+// 样式字符串缓存：把 (色相档, 亮度档, 白度档) 量化成一个 key，
+// 同一个 key 只拼一次 rgba() 字符串。否则每帧要拼几千次字符串，GC 会拖死。
+const styles = new Map();
+
+function styleFor(tb, lv, wb) {
+  const key = (tb * 12 + lv) * 3 + wb;
+  let s = styles.get(key);
+  if (s) return s;
+
+  const t = tb / 5;                              // 色相插值位置 0..1
+  const L = (lv + 0.5) / 12;                     // 归一化亮度
+  const w = [0, 0.30, 0.62][wb];                 // 白度三档
+
+  // 主色 = a、b 之间插值
+  const base = [0, 1, 2].map(i => PALETTE.a[i] + (PALETTE.b[i] - PALETTE.a[i]) * t);
+
+  // 最亮的几档做"反相"：亮底 + 暗字。
+  // 这一步是视觉上的点睛——暗色页里突然出现几块亮砖，层次立刻出来了。
+  const hot = lv >= 10 && wb > 0;
+  const tileMix = hot ? 0.5 + w * 0.3 : 0;
+
+  const tile = base.map(v => (v * 0.58) + (236 - v * 0.58) * tileMix);
+  const mixW = Math.min(0.94, 0.12 + L * 0.5 + w * 0.34);
+  const glyph = hot ? [6, 10, 16] : base.map(v => v + (246 - v) * mixW);
+
+  s = {
+    // 方块：非 hot 时透明度只有 0.1~0.6，所以是"淡淡的底"
+    tile: `rgba(${tile.map(v => v | 0).join(',')},${(hot ? 0.90 : 0.10 + L * 0.5).toFixed(3)})`,
+    // 字符：hot 时是暗字，否则是发亮的字
+    glyph: hot
+      ? `rgb(${glyph.map(v => v | 0).join(',')})`
+      : `rgba(${glyph.map(v => v | 0).join(',')},${(0.40 + L * 0.6).toFixed(3)})`,
+  };
+  styles.set(key, s);
+  return s;
+}
+
+// 哈希：给每个格子一个稳定的伪随机数，用来
+//   · 在两档字符里二选一
+//   · 偶尔插一个彩色高光
+function hash(x, y, t) {
+  let h = Math.imul(x, 374761393) ^ Math.imul(y, 668265263) ^ Math.imul(t, 1103515245);
+  h = Math.imul(h ^ (h >>> 13), 1274126177);
+  h ^= h >>> 16;
+  return (h >>> 0) / 4294967296;
+}
+
+function render() {
+  if (!cols) return;
+
+  drawField();                                        // ② 画场
+  const d = octx.getImageData(0, 0, ow, oh).data;      // ③ 取数据
+
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  ctx.clearRect(0, 0, W, H);
+
+  // 字体和基线一帧只设一次，别放进循环
+  ctx.font = `500 ${fs}px ${FONT}`;
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  const tx = cw / 2, ty = ch / 2 + 0.5;
+
+  const row = ow * 4;   // 一个 SS 行的字节数
+
+  for (let cy = 0; cy < rows; cy++) {
+    for (let cx = 0; cx < cols; cx++) {
+      // ③ 2×2 超采样求平均：取格子对应的 4 个采样点
+      const i = (cy * SS * ow + cx * SS) * 4;
+      const a = (d[i]         + d[i + 4]         + d[i + row]         + d[i + row + 4])         / 1020;
+      const w = (d[i + 1]     + d[i + 5]         + d[i + row + 1]     + d[i + row + 5])         / 1020;
+      const b = (d[i + 2]     + d[i + 6]         + d[i + row + 2]     + d[i + row + 6])         / 1020;
+
+      // ④ 解码：三路信号
+      const L  = Math.min(1, a + b + w * 0.55);          // 亮度 = 总强度
+      if (L < 0.055) continue;                            // 太暗直接跳过（省掉大部分格子）
+      const tb = Math.round(b / (a + b + 1e-4) * 5);      // 色相 = B/(R+B)，5 档
+      const lv = Math.min(11, (L * 12) | 0);              // 亮度 → 12 档
+      const wb = w < 0.12 ? 0 : w < 0.32 ? 1 : 2;         // 白度 3 档
+
+      const st = styleFor(tb, lv, wb);
+      const x = cx * cw, y = cy * ch;
+
+      // ⑥-a 先铺底色方块（最暗的一档不铺，保持通透）
+      if (lv >= 1) {
+        ctx.fillStyle = st.tile;
+        ctx.fillRect(x + 1, y + 1, cw - 2, ch - 2);
+      }
+
+      // ⑥-b 再叠字符
+      // 字符不是每帧都换：约 1.4 次/秒。换太快会像雪花屏，换太慢又像静止图片。
+      const tick = Math.floor(time * 1.4 + ((cx * 7 + cy * 13) & 15) / 16);
+      const h = hash(cx, cy, tick);
+
+      // 中等亮度的格子里，约 1.4% 撒一个彩色高光，制造"生物荧光"的惊喜感
+      if (lv >= 4 && lv < 10 && h > 0.986) {
+        ctx.fillStyle = ACCENTS[(h * 1e4 | 0) & 3];
+      } else {
+        ctx.fillStyle = st.glyph;
+      }
+      ctx.fillText(RAMP[lv][h < 0.55 ? 0 : 1], x + tx, y + ty);
+    }
+  }
+}
+
+/* ===================== 主循环 ====================================== */
+
+function step(dt) {
+  time += dt;
+  for (const j of jellies) {
+    // 缓慢向上漂 + 横向摆
+    j.y -= j.speed * dt * 1.4;
+    j.x += Math.sin(time * 0.4 + j.phase) * dt * 0.6;
+
+    // 溢出边界就绕回去（用"绕"而不是"重生"，避免突然出现）
+    if (j.y < -j.R * 5) { j.y = rows + j.R * 5; j.x = Math.random() * cols; }
+    if (j.x < -j.R * 4) j.x = cols + j.R * 4;
+    if (j.x > cols + j.R * 4) j.x = -j.R * 4;
+  }
+}
+
+function loop(now) {
+  raf = requestAnimationFrame(loop);
+  if (!last) { last = now; return; }
+
+  let dt = (now - last) / 1000;
+  last = now;
+
+  // 硬锁帧率：不到 1/30 秒就直接返回，什么都不画
+  acc += Math.min(dt, 0.1);
+  if (acc < 1 / MAX_FPS) return;
+
+  // 固定步长 + 子步：让物理不受帧率抖动影响
+  const n = Math.max(1, Math.min(6, Math.round(acc * 60)));
+  const h = acc / n;
+  for (let i = 0; i < n; i++) step(h);
+  acc = 0;
+
+  render();
+}
+
+/* ===================== 尺寸自适应 ================================== */
+
+function resize() {
+  dpr = Math.min(window.devicePixelRatio || 1, 2);
+  W = window.innerWidth;
+  H = window.innerHeight;
+
+  canvas.width = Math.round(W * dpr);
+  canvas.height = Math.round(H * dpr);
+
+  // 用「每格多少像素」反推网格规模：格子大小基本恒定，列数随宽度变化
+  fs = W < 560 ? 10 : W < 1100 ? 11 : 12;
+  measureCell();
+  cols = Math.max(20, Math.floor(W / cw));
+  rows = Math.max(12, Math.floor(H / ch));
+
+  ow = cols * SS;
+  oh = rows * SS;
+  off.width = ow;
+  off.height = oh;
+  octx.imageSmoothingEnabled = false;   // 我们是拿它当数据读，别插值
+
+  // 重建水母，尺寸跟着网格走
+  const n = W < 560 ? 3 : 5;
+  jellies = Array.from({ length: n }, (_, i) => makeJelly(i));
+}
+
+/* ===================== 生命周期 ==================================== */
+
+let rt = null;
+window.addEventListener('resize', () => {
+  clearTimeout(rt);
+  rt = setTimeout(resize, 150);
+});
+
+// 页面隐藏时停掉，省电
+document.addEventListener('visibilitychange', () => {
+  if (document.hidden) { cancelAnimationFrame(raf); raf = 0; }
+  else if (!raf && playing) { last = 0; raf = requestAnimationFrame(loop); }
+});
+
+// 尊重系统的「减少动态效果」
+canvas.addEventListener('pointerdown', () => {
+  playing = !playing;
+  if (!playing) { cancelAnimationFrame(raf); raf = 0; }
+  else if (!raf) { last = 0; raf = requestAnimationFrame(loop); }
+});
+
+resize();
+if (playing) raf = requestAnimationFrame(loop);
+
+})();
+</script>
+</body>
+</html>

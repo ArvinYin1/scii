@@ -1,0 +1,584 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>shoal — what's surfacing today?</title>
+<style>
+  :root{
+    --paper:#FAFAF8;
+    --grid:#EEEEEB;
+    --ink:#1B1B18;
+    --ink-soft:#6F6152;
+    --muted:#ABABA9;
+    --meta:#8B857D;
+    --meta-dim:#B7B1A8;
+    --line:#EDEBE6;
+    --sans:"Avenir Next","Avenir","Helvetica Neue",Helvetica,Arial,sans-serif;
+    --mono:ui-monospace,"SF Mono",SFMono-Regular,Menlo,Consolas,monospace;
+  }
+  *{box-sizing:border-box}
+  html,body{height:100%}
+  body{
+    margin:0; background:var(--paper); color:var(--ink);
+    font-family:var(--sans);
+    -webkit-font-smoothing:antialiased; -moz-osx-font-smoothing:grayscale;
+    overflow:hidden;
+  }
+  #water{position:fixed; inset:0; width:100%; height:100%; display:block; z-index:0}
+
+  /* ---------------------------------------------------------------- chrome */
+  .chrome{position:fixed; inset:0; z-index:2; pointer-events:none}
+  .chrome > *{pointer-events:auto}
+
+  .brand{position:absolute; top:26px; left:26px; display:flex; align-items:center; gap:11px}
+  .brand__mark{display:grid; grid-template-columns:repeat(3,11px); grid-template-rows:repeat(2,11px); gap:2px}
+  .brand__mark i{display:block; border-radius:1px}
+  .brand__mark i:nth-child(1){background:#B5523F}
+  .brand__mark i:nth-child(2){background:#B9695B}
+  .brand__mark i:nth-child(3){background:#D3CEC9}
+  .brand__mark i:nth-child(4){background:transparent}
+  .brand__mark i:nth-child(5){background:#1A1A1A}
+  .brand__mark i:nth-child(6){background:#1A1A1A}
+  .brand__name{font-size:20.5px; letter-spacing:.005em; line-height:1; color:var(--ink)}
+
+  .meta{position:absolute; top:29px; right:26px; display:flex; align-items:center; gap:16px}
+  .meta__hist{font-family:var(--mono); font-size:13.5px; letter-spacing:.055em; color:var(--meta)}
+  .meta__hist b{font-weight:400; color:var(--meta-dim); margin-left:5px}
+  .moon{
+    width:38px; height:38px; border-radius:50%; border:1px solid var(--line);
+    background:transparent; display:grid; place-items:center; cursor:pointer; padding:0;
+    color:#4C4A45; transition:background .2s, border-color .2s;
+  }
+  .moon:hover{background:#F2F1ED; border-color:#E2E0DA}
+
+  /* --------------------------------------------------------------- centre */
+  .stage{
+    position:absolute; left:50%; transform:translateX(-50%);
+    width:min(660px,calc(100vw - 56px));
+    display:flex; flex-direction:column; align-items:center;
+    top:calc(50% - 196px);
+  }
+  .headline{
+    margin:0 0 26px; text-align:center;
+    font-size:clamp(24px,3.72vw,41px); font-weight:300;
+    letter-spacing:-.019em; line-height:1.12; color:var(--ink);
+  }
+  .ask{
+    position:relative; width:100%; margin:0;
+    background:rgba(255,255,255,.72);
+    -webkit-backdrop-filter:blur(22px) saturate(1.06);
+    backdrop-filter:blur(22px) saturate(1.06);
+    border:1px solid rgba(0,0,0,.045);
+    border-radius:29px;
+    box-shadow:0 1px 1px rgba(60,50,40,.03), 0 12px 26px -12px rgba(70,58,45,.16), 0 34px 60px -34px rgba(70,58,45,.22);
+    padding:19px 20px 17px;
+    display:block;
+  }
+  .ask__input{
+    width:100%; border:0; outline:0; background:transparent;
+    font-family:inherit; font-size:clamp(16px,1.72vw,20.5px); font-weight:400;
+    color:var(--ink); padding:2px 4px 0; letter-spacing:-.005em;
+  }
+  .ask__input::placeholder{color:var(--muted)}
+  .ask__row{display:flex; align-items:center; gap:11px; margin-top:15px}
+  .plus{
+    width:30px; height:30px; border-radius:50%; border:0; background:transparent;
+    color:#3E3B36; cursor:pointer; padding:0;
+    display:grid; place-items:center; flex:0 0 auto;
+  }
+  .plus:hover{background:#F1F0EC}
+  .seg{
+    display:flex; align-items:center; gap:2px; padding:3px;
+    background:#F0EFEB; border-radius:999px;
+  }
+  .seg__b{
+    border:0; cursor:pointer; font-family:var(--mono); font-size:12.5px; letter-spacing:.01em;
+    background:transparent; color:#8E897F; padding:5px 12px; border-radius:999px;
+    transition:background .18s, color .18s;
+  }
+  .seg__b.on{background:#fff; color:#2C2A26; box-shadow:0 1px 2px rgba(0,0,0,.06)}
+  .submit{
+    margin-left:auto; width:38px; height:38px; border-radius:50%; border:0;
+    background:#EDECE8; color:#A7A29A; cursor:pointer;
+    display:grid; place-items:center; flex:0 0 auto;
+    transition:background .2s, color .2s;
+  }
+  .ask.is-live .submit{background:#22211E; color:#fff}
+  .submit svg{display:block}
+
+  .legend{
+    margin-top:19px; display:flex; align-items:center; justify-content:center; gap:17px;
+    font-family:var(--mono); font-size:12px; letter-spacing:.075em; color:#B3AEA6;
+  }
+  .legend span{display:inline-flex; align-items:center; gap:6px; white-space:nowrap}
+
+  @media (max-width:720px){
+    .stage{top:calc(50% - 170px)}
+    .legend{gap:11px; font-size:10.5px}
+    .brand{top:18px; left:18px} .meta{top:21px; right:18px}
+  }
+  @media (prefers-reduced-motion:reduce){
+    *{transition:none !important}
+  }
+</style>
+</head>
+<body>
+<canvas id="water" aria-hidden="true"></canvas>
+
+<div class="chrome">
+  <div class="brand">
+    <span class="brand__mark"><i></i><i></i><i></i><i></i><i></i><i></i></span>
+    <span class="brand__name">shoal</span>
+  </div>
+
+  <div class="meta">
+    <span class="meta__hist">history<b>03</b></span>
+    <button class="moon" id="moon" aria-label="Toggle appearance">
+      <svg width="15" height="15" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+        <path d="M13.2 9.6A5.7 5.7 0 0 1 6.4 2.8a5.7 5.7 0 1 0 6.8 6.8Z"
+              stroke="currentColor" stroke-width="1.3" stroke-linejoin="round"/>
+      </svg>
+    </button>
+  </div>
+
+  <div class="stage">
+    <h1 class="headline">what&rsquo;s surfacing today?</h1>
+
+    <form class="ask" id="ask" autocomplete="off" novalidate>
+      <input class="ask__input" id="q" type="text" placeholder="Ask Shoal anything…"
+             aria-label="Ask Shoal anything" />
+      <div class="ask__row">
+        <button type="button" class="plus" aria-label="Add attachment">
+          <svg width="13" height="13" viewBox="0 0 14 14" fill="none" aria-hidden="true">
+            <path d="M7 1v12M1 7h12" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/>
+          </svg>
+        </button>
+        <div class="seg" role="tablist" aria-label="Depth">
+          <button type="button" role="tab" class="seg__b on" aria-selected="true">shallow</button>
+          <button type="button" role="tab" class="seg__b" aria-selected="false">deep</button>
+        </div>
+        <button type="submit" class="submit" aria-label="Ask">
+          <svg width="14" height="14" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+            <path d="M4.6 11.4 11.4 4.6M5.6 4.6h5.8v5.8" stroke="currentColor"
+                  stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+          </svg>
+        </button>
+      </div>
+    </form>
+
+    <div class="legend">
+      <span><svg width="9" height="9" viewBox="0 0 10 10" fill="none" aria-hidden="true"><circle cx="5" cy="5" r="3.4" stroke="currentColor" stroke-width="1.2"/></svg>cast</span>
+      <span><svg width="9" height="9" viewBox="0 0 10 10" fill="none" aria-hidden="true"><path d="M5 1v8M1 5h8" stroke="currentColor" stroke-width="1.2"/></svg>netline</span>
+      <span>tap the water to feed them</span>
+    </div>
+  </div>
+</div>
+
+<script>
+(function () {
+  'use strict';
+
+  var cv = document.getElementById('water');
+  var ctx = cv.getContext('2d');
+  var W = 0, H = 0, DPR = 1, CELL = 19.5;
+
+  var PAPER = '#FAFAF8';
+  var GRIDC = '#EEEEEB';
+  var GRID_RATIO = 0.01966;        // 19.5px at 992px wide — measured
+  var BARE_INK = '#6F6152';
+
+  var HUES = [
+    { h:  10, s: 46, l: 48 },
+    { h:  18, s: 33, l: 55 },
+    { h:  44, s: 36, l: 57 },
+    { h: 214, s: 17, l: 54 },
+    { h:  28, s: 18, l: 55 }
+  ];
+  var HEAVY = ['#','%','8','S','X','@'];
+  var SOFT  = ['o','e','s','t','0','3','a',';',':',',','.','\''];
+  // ordered dense -> sparse: the glyph is picked off this ramp by body tone,
+  // the way a luminance-to-ASCII mapping would
+  var RAMP = ['@','#','%','8','S','X','o','e','s','t','0','3','a',';',':',',','.'];
+
+  var reduceMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+  function mulberry32(a){
+    return function(){
+      a |= 0; a = a + 0x6D2B79F5 | 0;
+      var t = Math.imul(a ^ a >>> 15, 1 | a);
+      t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t;
+      return ((t ^ t >>> 14) >>> 0) / 4294967296;
+    };
+  }
+  function clamp(v,a,b){ return v<a?a:v>b?b:v; }
+
+  /* =====================================================================
+     The fish is a POLYGON in local space: length 1 from tail (-0.5) to
+     snout (+0.5). It is placed with an arbitrary heading, but every
+     character is drawn UPRIGHT inside its graph-paper cell — that is the
+     whole trick of the original: a rotated animal made of upright letters.
+  ===================================================================== */
+  var FISH_POLY = [
+    [-0.500,-0.310], [-0.360,-0.132], [-0.200,-0.126],
+    [ 0.000,-0.272], [ 0.140,-0.290], [ 0.330,-0.152],
+    [ 0.500, 0.000],
+    [ 0.330, 0.152], [ 0.140, 0.290], [ 0.000, 0.272],
+    [-0.200, 0.126], [-0.360, 0.132], [-0.500, 0.310],
+    [-0.400, 0.000]                       // forked tail notch
+  ];
+
+  function insidePoly(px, py, poly) {
+    var c = false, n = poly.length;
+    for (var i = 0, j = n - 1; i < n; j = i++) {
+      var xi = poly[i][0], yi = poly[i][1], xj = poly[j][0], yj = poly[j][1];
+      if (((yi > py) !== (yj > py)) &&
+          (px < (xj - xi) * (py - yi) / (yj - yi) + xi)) c = !c;
+    }
+    return c;
+  }
+
+  function scaledPoly(poly, k) {
+    // shrink towards the body centroid (not the midpoint) for the inset test
+    var cx = 0.02, cy = 0, out = [];
+    for (var i = 0; i < poly.length; i++) {
+      out.push([cx + (poly[i][0] - cx) * k, cy + (poly[i][1] - cy) * k]);
+    }
+    return out;
+  }
+
+  /* ---------------------------------------------------- render one fish */
+  function paintFish(f) {
+    var L = f.len * CELL;                 // length in px
+    var Hh = L * 0.66;                    // bbox height in px
+    var pad = Math.ceil((f.layer.blur > 0 ? f.layer.blur * 3 : 2) * DPR);
+    var w = Math.round(L + pad * 2), h = Math.round(Hh + pad * 2);
+
+    var c = document.createElement('canvas');
+    c.width = w; c.height = h;
+    var g = c.getContext('2d');
+    if (f.layer.blur > 0) g.filter = 'blur(' + f.layer.blur.toFixed(2) + 'px)';
+
+    var rnd = mulberry32(f.seed);
+    var base = HUES[f.hue];
+    var cos = Math.cos(f.heading), sin = Math.sin(f.heading);
+    var inset = scaledPoly(FISH_POLY, Math.max(0.30, 1 - 1.15 / f.len));
+
+    var fontSize = Math.round(CELL * 0.78 * DPR * 10) / 10;
+    g.textAlign = 'center';
+    g.textBaseline = 'middle';
+    g.font = '700 ' + fontSize + 'px ui-monospace, "SF Mono", Menlo, Consolas, monospace';
+
+    // walk the cells that can possibly intersect the rotated bbox
+    var reach = Math.ceil((L + Hh) / CELL) + 2;
+    var ccx = pad + L / 2, ccy = pad + Hh / 2;
+    var ci0 = Math.floor((ccx - reach * CELL) / CELL), ci1 = Math.ceil((ccx + reach * CELL) / CELL);
+    var cj0 = Math.floor((ccy - reach * CELL) / CELL), cj1 = Math.ceil((ccy + reach * CELL) / CELL);
+
+    var drawn = 0;
+    for (var cj = cj0; cj <= cj1; cj++) {
+      for (var ci = ci0; ci <= ci1; ci++) {
+        var x = ci * CELL, y = cj * CELL;                 // cell top-left in sprite space
+        var ccx2 = x + CELL / 2 - ccx, ccy2 = y + CELL / 2 - ccy;
+        // into the fish's local frame (unit length)
+        var lx = ( ccx2 * cos + ccy2 * sin) / L;
+        var ly = (-ccx2 * sin + ccy2 * cos) / L;
+
+        var within = insidePoly(lx, ly, FISH_POLY);
+        if (!within) continue;
+        var core = insidePoly(lx, ly, inset);
+        var state = core ? 2 : 1;
+
+        // dissolve the rim
+        if (state === 1 && rnd() < 0.13) continue;
+        if (state === 2 && rnd() < 0.012) state = 1;
+
+        // smooth tonal field (three octaves) + a weak head-to-tail gradient,
+        // matching the measured axial gradient of r ~ -0.26
+        var sd = f.seed * 0.0007;
+        var o1 = Math.sin(lx * 9.1 + sd * 11.0) * 0.5 + 0.5;
+        var o2 = Math.sin(ly * 13.7 + lx * 4.3 + sd * 23.0) * 0.5 + 0.5;
+        var o3 = Math.sin((lx + ly) * 21.3 + sd * 37.0) * 0.5 + 0.5;
+        var shade = 0.46 * o1 + 0.32 * o2 + 0.22 * o3;
+        shade = clamp(shade * 0.74 + (0.5 - lx) * 0.30 + 0.15, 0, 1);
+        if (state === 2) shade = clamp(shade * 0.92 + 0.06, 0, 1);
+
+        var Lc = 30 + shade * 36;                     // HSL lightness %, not RGB luma
+        var Sc = clamp(base.s * 0.70 + shade * 12, 10, 58);
+        var fill = 'hsl(' + base.h.toFixed(1) + ',' + Sc.toFixed(1) + '%,' + Lc.toFixed(1) + '%)';
+
+        if (state === 2) {
+          g.fillStyle = fill;
+          g.fillRect(x, y, CELL + 0.6, CELL + 0.6);
+          g.fillStyle = 'rgba(255,254,252,.97)';
+        } else {
+          g.fillStyle = BARE_INK;
+          g.globalAlpha = 0.95;
+        }
+        var gi2 = Math.min(RAMP.length - 1, Math.floor(shade * RAMP.length));
+        g.fillText(state === 2 ? RAMP[gi2] : SOFT[(rnd() * SOFT.length) | 0],
+                   x + CELL / 2, y + CELL / 2 + CELL * 0.02);
+        g.globalAlpha = 1;
+        drawn++;
+      }
+    }
+    // a few loose characters floating just off the body
+    for (var s = 0; s < 3; s++) {
+      var a = rnd() * Math.PI * 2, rr = (0.55 + rnd() * 0.5) * L * 0.5;
+      var sx = ccx + Math.cos(a) * rr, sy = ccy + Math.sin(a) * rr * 0.45;
+      var gx2 = Math.round(sx / CELL) * CELL, gy2 = Math.round(sy / CELL) * CELL;
+      if (gx2 < 0 || gy2 < 0 || gx2 > w - CELL || gy2 > h - CELL) continue;
+      g.globalAlpha = 0.55;
+      g.fillStyle = BARE_INK;
+      g.fillText(SOFT[(rnd() * SOFT.length) | 0], gx2 + CELL / 2, gy2 + CELL / 2);
+      g.globalAlpha = 1;
+    }
+    return { canvas: c, w: w, h: h, pad: pad, cx: ccx, cy: ccy };
+  }
+
+  /* ================================================================= fish */
+  var fish = [];
+  var LAYERS = [
+    // depth by SIZE + ALPHA; the reference's near and far fish are equally sharp
+    { id:'far',  alpha:0.85, blur:0.6, n:6, len:[8,11],  speed:[9,13]  },
+    { id:'mid',  alpha:0.98, blur:0.15, n:6, len:[11,15], speed:[14,19] },
+    { id:'near', alpha:1.00, blur:0.0, n:4, len:[15,21], speed:[20,26] }
+  ];
+
+  function spawnFish(layer, rnd, i) {
+    // headings are spread around the compass: the reference shows fish pointing
+    // up, down and sideways, but always made of upright letters
+    var h = rnd() * Math.PI * 2;
+    return {
+      layer: layer,
+      len: layer.len[0] + rnd() * (layer.len[1] - layer.len[0]),
+      hue: (rnd() * HUES.length) | 0,
+      x: rnd() * W, y: ((i % 3) / 3 + rnd() * 0.33) * H,
+      heading: h,
+      speed: layer.speed[0] + rnd() * (layer.speed[1] - layer.speed[0]),
+      wobF: 0.03 + rnd() * 0.05, wobA: 0.10 + rnd() * 0.16, wobPh: rnd() * 6.28,
+      bobA: 2 + rnd() * 4, bobF: 0.06 + rnd() * 0.08, bobPh: rnd() * 6.28,
+      seed: (rnd() * 1e9) | 0,
+      cacheKey: '', cache: null,
+      mutate: 1.6 + rnd() * 2.4, mutateT: rnd() * 2,
+      feedUntil: 0
+    };
+  }
+
+  function seed() {
+    var rnd = mulberry32(4711);
+    fish.length = 0;
+    var scale = clamp(Math.sqrt(W * H) / 940, 0.7, 1.45);
+    for (var li = 0; li < LAYERS.length; li++) {
+      var layer = LAYERS[li];
+      var n = Math.max(2, Math.round(layer.n * scale));
+      for (var i = 0; i < n; i++) fish.push(spawnFish(layer, rnd, i + li * 7));
+    }
+  }
+
+  /* ================================================================= dust */
+  var dust = [];
+  function seedDust() {
+    dust.length = 0;
+    var rnd = mulberry32(555);
+    var n = Math.round(clamp(W * H / 46000, 10, 30));
+    for (var i = 0; i < n; i++) {
+      dust.push({ x: rnd() * W, y: rnd() * H, g: SOFT[(rnd() * SOFT.length) | 0],
+                  a: 0.06 + rnd() * 0.09, sp: 2 + rnd() * 4, ph: rnd() * 6.28 });
+    }
+  }
+
+  /* =============================================================== ripples */
+  var ripples = [];
+  function tap(x, y) {
+    ripples.push({ x:x, y:y, t0:time });
+    if (ripples.length > 6) ripples.shift();
+    for (var i = 0; i < fish.length; i++) {
+      var f = fish[i];
+      var d = Math.hypot(f.x - x, f.y - y);
+      if (d < 430) {
+        f.feedUntil = time + 2.8;
+        // turn toward the disturbance
+        f.wobPh = Math.atan2(y - f.y, x - f.x);
+        f.speed *= 1.5;
+        setTimeout((function (ff) { return function () { ff.speed /= 1.5; }; })(f), 2800);
+      }
+    }
+  }
+
+  /* ================================================================ layout */
+  var time = 0, last = 0, raf = null;
+
+  function resize() {
+    DPR = Math.min(window.devicePixelRatio || 1, 2.5);
+    W = window.innerWidth; H = window.innerHeight;
+    CELL = Math.max(14, W * GRID_RATIO);
+    cv.width = Math.round(W * DPR); cv.height = Math.round(H * DPR);
+    cv.style.width = W + 'px'; cv.style.height = H + 'px';
+    seed(); seedDust();
+  }
+
+  /* the field fades out behind the headline so the copy always reads */
+  function fadeAt(px, py) {
+    var cx = W * 0.50, cy = H * 0.495;
+    var rx = W * 0.400, ry = H * 0.190;
+    var nx = (px - cx) / rx, ny = (py - cy) / ry;
+    var d = Math.sqrt(nx * nx + ny * ny);
+    return clamp(0.22 + 0.78 * clamp((d - 0.62) / 0.55, 0, 1), 0.22, 1);
+  }
+
+  var gridCanvas = null;
+  function buildGrid() {
+    var c = document.createElement('canvas');
+    c.width = Math.round(W * DPR); c.height = Math.round(H * DPR);
+    var g = c.getContext('2d');
+    g.fillStyle = PAPER; g.fillRect(0, 0, c.width, c.height);
+    g.fillStyle = GRIDC;
+    var step = CELL * DPR, p, i;
+    for (i = 0; ; i++) { p = Math.round(i * step); if (p > c.width) break; g.fillRect(p, 0, 1, c.height); }
+    for (i = 0; ; i++) { p = Math.round(i * step); if (p > c.height) break; g.fillRect(0, p, c.width, 1); }
+    return c;
+  }
+
+  function frame(now) {
+    var dt = last ? Math.min((now - last) / 1000, 0.05) : 0.016;
+    last = now;
+    time += dt * (reduceMotion ? 0.25 : 1);
+
+    ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+    ctx.clearRect(0, 0, W, H);
+    ctx.drawImage(gridCanvas, 0, 0, W, H);
+
+    /* dust */
+    ctx.font = '500 ' + Math.round(CELL * 0.60) + 'px ui-monospace, Menlo, monospace';
+    ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+    ctx.fillStyle = BARE_INK;
+    for (var di = 0; di < dust.length; di++) {
+      var du = dust[di];
+      du.x += du.sp * dt * (reduceMotion ? 0.2 : 1);
+      if (du.x > W + CELL) du.x = -CELL;
+      var dx = Math.round(du.x / CELL) * CELL + CELL / 2;
+      var dy = Math.round(du.y / CELL) * CELL + CELL / 2 + Math.sin(time * 0.4 + du.ph) * CELL * 0.4;
+      ctx.globalAlpha = du.a * fadeAt(dx, dy);
+      ctx.fillText(du.g, dx, dy);
+    }
+    ctx.globalAlpha = 1;
+
+    /* fish */
+    for (var li = 0; li < LAYERS.length; li++) {
+      var layer = LAYERS[li];
+      for (var fi = 0; fi < fish.length; fi++) {
+        var f = fish[fi];
+        if (f.layer !== layer) continue;
+
+        // drift along the heading, turning gently
+        var turn = Math.sin(time * f.wobF * 6.283 + f.wobPh) * f.wobA;
+        var hd = f.heading + turn;
+        var sp = f.speed * (reduceMotion ? 0.22 : 1);
+        f.x += Math.cos(hd) * sp * dt;
+        f.y += Math.sin(hd) * sp * dt + Math.sin(time * f.bobF * 6.283 + f.bobPh) * f.bobA * dt * 8;
+
+        var pad = 140;
+        if (f.x < -pad || f.x > W + pad || f.y < -pad || f.y > H + pad) {
+          // re-enter from the opposite edge
+          if (Math.cos(hd) >= 0) f.x = -pad; else f.x = W + pad;
+          f.y = Math.random() * H;
+          f.heading = Math.atan2(H * 0.5 - f.y, (f.x < 0 ? W : 0) - f.x);
+        }
+
+        // the appearance only changes when the fish crosses a cell or a
+        // heading bucket — so cache the painted sprite and blit it
+        var gx = Math.round(f.x / CELL), gy = Math.round(f.y / CELL);
+        var hb = Math.round(f.heading * 24 / Math.PI) + Math.round(turn * 6);
+        var key = gx + '|' + gy + '|' + hb + '|' + f.len.toFixed(1) + '|' + f.hue;
+
+        f.mutateT += dt;
+        if (f.mutateT > f.mutate) { f.mutateT = 0; f.seed = (Math.random() * 1e9) | 0; f.cacheKey = ''; }
+
+        if (key !== f.cacheKey) {
+          f.cacheKey = key;
+          f.cache = paintFish({
+            len: f.len, heading: hd, hue: f.hue, seed: f.seed, layer: f.layer
+          });
+        }
+        if (!f.cache) continue;
+
+        var hw = f.len * CELL * 0.5, hh = f.len * CELL * 0.33;
+        var fa = Math.min(
+          fadeAt(f.x, f.y),
+          fadeAt(f.x - hw, f.y - hh), fadeAt(f.x + hw, f.y - hh),
+          fadeAt(f.x - hw, f.y + hh), fadeAt(f.x + hw, f.y + hh),
+          fadeAt(f.x, f.y - hh), fadeAt(f.x, f.y + hh),
+          fadeAt(f.x - hw, f.y), fadeAt(f.x + hw, f.y)
+        );
+        var a = layer.alpha * fa;
+        if (f.feedUntil > time) a = Math.min(1, a + 0.10);
+        if (a < 0.02) continue;
+
+        ctx.globalAlpha = a;
+        var cs = f.cache;
+        ctx.drawImage(cs.canvas, f.x - cs.cx, f.y - cs.cy, cs.w / DPR, cs.h / DPR);
+      }
+    }
+    ctx.globalAlpha = 1;
+
+    /* ripples */
+    for (var ri = ripples.length - 1; ri >= 0; ri--) {
+      var r = ripples[ri];
+      var age = time - r.t0;
+      if (age > 2.0) { ripples.splice(ri, 1); continue; }
+      for (var ring = 0; ring < 3; ring++) {
+        var t = age - ring * 0.17;
+        if (t <= 0) continue;
+        var al = clamp(1 - t / 1.25, 0, 1) * 0.28;
+        if (al <= 0) continue;
+        ctx.beginPath();
+        ctx.arc(r.x, r.y, 14 + t * 180, 0, 6.2832);
+        ctx.strokeStyle = 'rgba(150,120,95,' + al.toFixed(3) + ')';
+        ctx.lineWidth = 1; ctx.stroke();
+      }
+    }
+
+    raf = requestAnimationFrame(frame);
+  }
+
+  /* ================================================================= boot */
+  function start() {
+    resize(); gridCanvas = buildGrid();
+    if (!raf) { last = 0; raf = requestAnimationFrame(frame); }
+  }
+
+  var rt = null;
+  window.addEventListener('resize', function () {
+    clearTimeout(rt);
+    rt = setTimeout(function () { resize(); gridCanvas = buildGrid(); }, 150);
+  });
+  document.addEventListener('visibilitychange', function () {
+    if (document.hidden) { cancelAnimationFrame(raf); raf = null; }
+    else if (!raf) { last = 0; raf = requestAnimationFrame(frame); }
+  });
+
+  window.addEventListener('pointerdown', function (e) {
+    if (e.target.closest('.chrome')) return;
+    tap(e.clientX, e.clientY);
+  });
+
+  var q = document.getElementById('q'), ask = document.getElementById('ask');
+  q.addEventListener('input', function () { ask.classList.toggle('is-live', q.value.trim().length > 0); });
+  ask.addEventListener('submit', function (e) { e.preventDefault(); tap(W * 0.5, H * 0.62); });
+
+  Array.prototype.forEach.call(document.querySelectorAll('.seg__b'), function (b) {
+    b.addEventListener('click', function () {
+      Array.prototype.forEach.call(document.querySelectorAll('.seg__b'), function (o) {
+        o.classList.remove('on'); o.setAttribute('aria-selected', 'false');
+      });
+      b.classList.add('on'); b.setAttribute('aria-selected', 'true');
+    });
+  });
+
+  start();
+})();
+
+</script>
+</body>
+</html>

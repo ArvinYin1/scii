@@ -1,0 +1,649 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>scii — 让想法开出花来</title>
+<meta name="description" content="一朵由字符长成的花，缓慢呼吸。" />
+<style>
+  :root{
+    --bg:#08100C;
+    --ink:#F4F1EA;
+    --ink-2:#A9AFA6;
+    --ink-3:#6C746C;
+    --accent:#E7A277;
+    --line:rgba(244,241,234,.14);
+    --mono:ui-monospace,"SF Mono",SFMono-Regular,Menlo,Consolas,monospace;
+    --sans:"PingFang SC","Hiragino Sans GB","Microsoft YaHei",-apple-system,BlinkMacSystemFont,"Segoe UI",Helvetica,Arial,sans-serif;
+  }
+  *{box-sizing:border-box}
+  html,body{height:100%}
+  body{
+    margin:0;background:var(--bg);color:var(--ink);
+    font-family:var(--sans);
+    -webkit-font-smoothing:antialiased;
+    overflow:hidden;
+  }
+  #stage{position:fixed;inset:0;width:100%;height:100%;display:block;z-index:0}
+
+  /* 让文字始终可读：花在左，文案在右，中间留空 */
+  .veil{
+    position:fixed;inset:0;z-index:1;pointer-events:none;
+    background:
+      radial-gradient(120% 90% at 8% 50%, rgba(8,16,12,0) 0%, rgba(8,16,12,0) 42%, rgba(8,16,12,.72) 72%, rgba(8,16,12,.92) 100%);
+  }
+
+  .chrome{position:fixed;inset:0;z-index:2;pointer-events:none}
+  .chrome > *{pointer-events:auto}
+
+  /* ---------- 左上字标 ---------- */
+  .brand{
+    position:absolute;top:34px;left:38px;
+    display:flex;align-items:center;gap:10px;
+  }
+  .brand .mark{
+    display:grid;grid-template-columns:repeat(2,5px);grid-template-rows:repeat(2,5px);gap:2.5px;
+  }
+  .brand .mark i{display:block;border-radius:1px;background:var(--accent)}
+  .brand .mark i:nth-child(2){background:rgba(231,162,119,.55)}
+  .brand .mark i:nth-child(3){background:rgba(231,162,119,.55)}
+  .brand .mark i:nth-child(4){background:rgba(231,162,119,.20)}
+  .brand .name{
+    font-family:var(--mono);font-size:14px;letter-spacing:.20em;
+    text-transform:lowercase;color:var(--ink);
+  }
+
+  /* ---------- 右下角状态 ---------- */
+  .status{
+    position:absolute;right:38px;bottom:32px;
+    font-family:var(--mono);font-size:11px;letter-spacing:.10em;
+    color:var(--ink-3);text-align:right;line-height:1.9;
+  }
+  .status b{color:var(--accent);font-weight:400}
+
+  /* ---------- 主文案 ---------- */
+  .content{
+    position:absolute;
+    left:58%;top:50%;transform:translateY(-50%);
+    width:min(430px, calc(100vw - 96px));
+  }
+  .eyebrow{
+    font-family:var(--mono);font-size:11px;letter-spacing:.22em;
+    text-transform:uppercase;color:var(--accent);
+    margin:0 0 26px;display:flex;align-items:center;gap:11px;
+  }
+  .eyebrow::before{
+    content:"";width:26px;height:1px;background:var(--accent);display:block;opacity:.7;
+  }
+  h1{
+    font-size:clamp(30px,3.5vw,46px);
+    line-height:1.28;font-weight:500;letter-spacing:-.01em;
+    margin:0 0 22px;
+  }
+  h1 em{font-style:normal;color:var(--accent)}
+  .lede{
+    font-size:15.5px;line-height:1.95;color:var(--ink-2);
+    margin:0 0 40px;max-width:340px;
+  }
+  .cta{
+    display:inline-flex;align-items:center;gap:12px;
+    font-family:var(--mono);font-size:13px;letter-spacing:.10em;
+    color:var(--ink);text-decoration:none;
+    padding:13px 0;border-bottom:1px solid var(--line);
+    transition:border-color .25s, color .25s;
+  }
+  .cta:hover{border-color:var(--accent);color:var(--accent)}
+  .cta svg{transition:transform .25s}
+  .cta:hover svg{transform:translateX(4px)}
+
+  .hint{
+    position:absolute;left:58%;bottom:32px;
+    font-family:var(--mono);font-size:11px;letter-spacing:.10em;color:var(--ink-3);
+  }
+
+  /* ---------- 窄屏：花退到背景中央，文案压在下半部 ---------- */
+  @media (max-width:860px){
+    .veil{
+      background:linear-gradient(180deg,
+        rgba(8,16,12,.10) 0%, rgba(8,16,12,.35) 38%,
+        rgba(8,16,12,.86) 62%, rgba(8,16,12,.96) 100%);
+    }
+    .content{
+      left:50%;top:auto;bottom:12vh;transform:translateX(-50%);
+      width:min(440px, calc(100vw - 64px));text-align:center;
+    }
+    .eyebrow{justify-content:center}
+    .lede{margin-left:auto;margin-right:auto}
+    .hint{display:none}
+    .status{right:auto;left:50%;transform:translateX(-50%);text-align:center;bottom:22px;
+            font-size:10px}
+    .brand{top:24px;left:24px}
+  }
+  @media (prefers-reduced-motion:reduce){
+    .cta,.cta svg{transition:none}
+  }
+</style>
+</head>
+<body>
+  <canvas id="stage" aria-hidden="true"></canvas>
+  <div class="veil"></div>
+
+  <div class="chrome">
+    <div class="brand">
+      <span class="mark" aria-hidden="true"><i></i><i></i><i></i><i></i></span>
+      <span class="name">scii</span>
+    </div>
+
+    <div class="content">
+      <p class="eyebrow">ascii bloom</p>
+      <h1>让想法<br><em>开出花</em>来</h1>
+      <p class="lede">
+        一朵由字符长成的花。它不解释自己，只是缓慢地开合，
+        像所有还没想清楚、但已经在生长的事。
+      </p>
+      <a class="cta" href="#">
+        开始生长
+        <svg width="15" height="9" viewBox="0 0 15 9" fill="none" aria-hidden="true">
+          <path d="M0 4.5h13M9.5 1l3.5 3.5L9.5 8" stroke="currentColor" stroke-width="1.2"/>
+        </svg>
+      </a>
+    </div>
+
+    <div class="hint">把光标靠近它 —— 它会朝你开；点一下会绽放一次</div>
+
+    <div class="status">
+      <div>petals <b id="s-petals">13</b></div>
+      <div>bloom <b id="s-bloom">--</b></div>
+      <div>grid <b id="s-grid">--</b></div>
+    </div>
+  </div>
+
+<script>
+(() => {
+'use strict';
+
+/* =====================================================================
+   可调参数 —— 换肤只改这里
+
+   主体形状：PETAL 是单个花瓣的轮廓（单位坐标，沿 -y 方向朝外生长），
+             再按 RINGS 里的环配置复制、旋转、缩放。
+   字符表：  PETAL_RAMP 从暗到亮共 16 档，每档两个候选字（哈希二选一）。
+   配色：    A 是花心暖色，B 是花瓣外缘冷色；所有颜色都是这两者之间的插值。
+   ===================================================================== */
+
+const PETAL = [
+  [ 0.00, -0.03], [ 0.13, -0.16], [ 0.24, -0.37], [ 0.29, -0.60],
+  [ 0.26, -0.79], [ 0.15, -0.93], [ 0.00, -1.00], [-0.15, -0.93],
+  [-0.26, -0.79], [-0.29, -0.60], [-0.24, -0.37], [-0.13, -0.16]
+].map(p => [p[0], p[1]]);
+
+// 两个环：外环 8 瓣偏冷，内环 5 瓣偏暖，错位半格
+const RINGS = [
+  { n: 6, len: 1.00, m: 0.82, spin: 0.026, offset: 0.00 },
+  { n: 6, len: 0.56, m: 0.18, spin: -0.040, offset: 0.52 }
+];
+
+const PALETTE = {
+  a: [255, 182, 122],   // 花心：琥珀
+  b: [190,  86, 132],   // 外缘：玫瑰
+  core: [255, 246, 232],// 花心高光
+  bg: '#08100C'
+};
+
+const PETAL_RAMP = [
+  ['.', '·'], ['·', '.'], [',', '·'], [':', ';'],
+  [';', ':'], ['r', 'i'], ['i', 't'], ['t', 'o'],
+  ['o', 'e'], ['s', 'o'], ['x', 's'], ['%', 'x'],
+  ['8', '%'], ['S', '8'], ['@', 'S'], ['#', '@']
+];
+
+const POLLEN_RAMP = ['·', '.', '+', '·'];
+
+const TIMING = {
+  breathe: 7.4,     // 一次完整呼吸（开→合）的秒数
+  maxFps: 30
+};
+
+/* ===================================================================== */
+
+const cv = document.getElementById('stage');
+const ctx = cv.getContext('2d');
+
+const light = document.createElement('canvas');          // 光场：只有形状和光，没有字
+const lctx = light.getContext('2d', { willReadFrequently: true });
+
+const SS = 2;            // 每格每轴采样数
+
+let W = 0, H = 0, dpr = 1;
+let cw = 8, ch = 15, fs = 12;
+let cols = 0, rows = 0, ow = 0, oh = 0;
+let R = 120, CX = 0, CY = 0;
+
+let time = 0, last = 0, acc = 0, raf = 0;
+
+// 指针交互状态：prox = 靠近程度 0..1，lean = 朝向指针的角度，pulse = 点击脉冲 0..1
+const ptr = { x: 0, y: 0, active: false };
+let prox = 0, lean = 0, pulse = 0, shownOpen = 0;
+let pollen = [];
+const styles = new Map();
+
+// ?t=<秒> 渲染静帧，方便截图
+const stillT = parseFloat(new URLSearchParams(location.search).get('t'));
+const reduce = matchMedia('(prefers-reduced-motion: reduce)');
+
+const lerp = (a, b, t) => a + (b - a) * t;
+const clamp = (v, lo, hi) => v < lo ? lo : v > hi ? hi : v;
+
+function hash(x, y, t) {
+  let h = Math.imul(x, 374761393) ^ Math.imul(y, 668265263) ^ Math.imul(t, 1103515245);
+  h = Math.imul(h ^ (h >>> 13), 1274126177);
+  h ^= h >>> 16;
+  return (h >>> 0) / 4294967296;
+}
+
+/* ---------------------------------------------------------------------
+   把「总强度 k」和「色相比 m」编码进 R / B 两个通道，白度放进 G。
+   加法混合之后仍然能反解：R+B = k，B/(R+B) = m。
+   --------------------------------------------------------------------- */
+function col(m, k, w) {
+  return 'rgb(' + (Math.min(255, (1 - m) * k * 255) | 0) + ','
+                + (Math.min(255, w * 255) | 0) + ','
+                + (Math.min(255, m * k * 255) | 0) + ')';
+}
+
+/* ------------------------------- 姿态 ------------------------------- */
+
+// 呼吸：0 = 收拢，1 = 完全展开。用平滑的余弦而不是线性三角波。
+function bloomAt(t) {
+  const p = ((t / TIMING.breathe) % 1 + 1) % 1;
+  return 0.5 - 0.5 * Math.cos(p * Math.PI * 2);     // 0..1
+}
+
+// 轻微的整株摇摆
+function swayAt(t) {
+  return Math.sin(t * 0.26) * 0.045 + Math.sin(t * 0.11 + 1.3) * 0.03;
+}
+
+/* ---------------------------- 画光场 ---------------------------- */
+
+function drawPetal(g, angle, len, m, k, open) {
+  // 收拢时花瓣更竖直、更短；展开时外翻、拉长
+  const l = len * (0.74 + 0.26 * open) * R;
+  const spread = lerp(0.42, 1.0, open);
+
+  g.save();
+  g.translate(CX, CY);
+  g.rotate(angle * spread);
+  g.scale(1, 1);
+
+  const pts = PETAL.map(p => [p[0] * l * 0.54, p[1] * l]);
+
+  // 花瓣由根到尖渐暗，并带一点白心
+  const grd = g.createRadialGradient(0, 0, 0, 0, 0, l);
+  grd.addColorStop(0.00, col(m, k * 0.46, 0.16 * k));
+  grd.addColorStop(0.30, col(m, k * 0.34, 0.03 * k));
+  grd.addColorStop(0.76, col(m, k * 0.24, 0.00));
+  grd.addColorStop(1.00, col(m, k * 0.12, 0.00));
+  g.fillStyle = grd;
+
+  g.beginPath();
+  g.moveTo(pts[0][0], pts[0][1]);
+  for (let i = 1; i < pts.length; i++) {
+    const a = pts[i], b = pts[(i + 1) % pts.length];
+    g.quadraticCurveTo(a[0], a[1], (a[0] + b[0]) / 2, (a[1] + b[1]) / 2);
+  }
+  g.closePath();
+  g.fill();
+
+  // 描边让花瓣边界在字符化后仍然清晰
+  g.lineWidth = Math.max(1.4, R * 0.016);
+  g.strokeStyle = col(m, k * 1.05, 0.22 * k);
+  g.stroke();
+
+  // 中脉：一条从根到尖的线，制造"叶脉"感
+  g.beginPath();
+  g.moveTo(0, 0);
+  g.quadraticCurveTo(l * 0.02, -l * 0.5, 0, -l * 0.97);
+  g.lineWidth = Math.max(1, R * 0.008);
+  g.strokeStyle = col(m, k * 0.62, 0.12 * k);
+  g.stroke();
+
+  g.restore();
+}
+
+function drawField() {
+  lctx.setTransform(1, 0, 0, 1, 0, 0);
+  lctx.globalCompositeOperation = 'source-over';
+  lctx.fillStyle = '#000';
+  lctx.fillRect(0, 0, ow, oh);
+
+  // 坐标系保持 CSS 像素：把 1px 换算成 SS/cw 个离屏像素。
+  // 这样圆心仍是正圆（cw 与 ch 不同，若按"格"作画会被压扁）。
+  lctx.setTransform(SS / cw, 0, 0, SS / ch, 0, 0);
+  lctx.globalCompositeOperation = 'lighter';
+  lctx.lineCap = 'round';
+  lctx.lineJoin = 'round';
+
+  // 指针靠近会让整朵花更开；点击会额外顶一下
+  // 呼吸占主导，但指针靠近时叠一个"开度下限"——
+  // 否则在收拢相位悬停会几乎没有反馈（乘法放大会把 0 放大成 0）
+  const open = clamp(bloomAt(time) * (1 + prox * 0.28) + prox * 0.26 + pulse * 0.45, 0, 1.25);
+  shownOpen = open;
+
+  // 整朵花朝指针方向轻微位移，制造"被吸引"的体感
+  const mag = prox * Math.min(18, R * 0.055);
+  lctx.translate(Math.cos(lean) * mag, Math.sin(lean) * mag);
+
+  // ---- 背后的光晕：让花有"发光"的存在感
+  const hr = R * 1.32;
+  const halo = lctx.createRadialGradient(CX, CY, R * 0.25, CX, CY, hr);
+  halo.addColorStop(0.00, col(0.40, 0.10 + 0.07 * open, 0.03));
+  halo.addColorStop(0.55, col(0.60, 0.035 + 0.03 * open, 0.00));
+  halo.addColorStop(1.00, col(0.7, 0, 0));
+  lctx.fillStyle = halo;
+  lctx.beginPath();
+  lctx.arc(CX, CY, hr, 0, Math.PI * 2);
+  lctx.fill();
+
+  // ---- 花瓣：外环先画，内环压上去
+  for (let ri = RINGS.length - 1; ri >= 0; ri--) {
+    const ring = RINGS[ri];
+    const spin = ring.spin * time + swayAt(time);
+    for (let i = 0; i < ring.n; i++) {
+      const base = (i / ring.n) * Math.PI * 2 + ring.offset + spin;
+      // 相邻花瓣错开一点开合相位，整朵花就不会像机械开合
+      const ph = 0.5 + 0.5 * Math.sin(bloomAt(time) * Math.PI * 2 + i * 1.7);
+
+      // 这一瓣是否朝向指针：+1 = 正对，-1 = 背对
+      const align = Math.cos(base - lean);
+
+      // 朝向指针的花瓣张开更多、更长、更亮；背向的收着
+      const localOpen = clamp(open * (1 + align * prox * 0.55), 0, 1.3);
+      const lenMul = 1 + align * prox * 0.18;
+      const k = (ring.m < 0.5 ? 1.30 : 1.00) * (0.88 + 0.12 * ph) * (1 + align * prox * 0.42);
+
+      drawPetal(lctx, base, ring.len * lenMul, ring.m, k, localOpen * (0.82 + 0.18 * ph));
+    }
+  }
+
+  // ---- 花心：一小团白热 + 辐射的雄蕊
+  const coreK = (0.55 + 0.45 * open) * (1 + prox * 0.35);
+  const cg = lctx.createRadialGradient(CX, CY, 0, CX, CY, R * 0.20);
+  cg.addColorStop(0.00, col(0.30, coreK * 0.92, 0.98 * coreK));
+  cg.addColorStop(0.45, col(0.22, coreK * 0.58, 0.34 * coreK));
+  cg.addColorStop(1.00, col(0.20, 0, 0));
+  lctx.fillStyle = cg;
+  lctx.beginPath();
+  lctx.arc(CX, CY, R * 0.20, 0, Math.PI * 2);
+  lctx.fill();
+
+  const stamens = 11;
+  for (let i = 0; i < stamens; i++) {
+    const a = (i / stamens) * Math.PI * 2 + time * 0.08;
+    const rr = R * (0.16 + 0.12 * open);
+    lctx.beginPath();
+    lctx.moveTo(CX + Math.cos(a) * R * 0.05, CY + Math.sin(a) * R * 0.05);
+    lctx.lineTo(CX + Math.cos(a) * rr, CY + Math.sin(a) * rr);
+    lctx.lineWidth = Math.max(0.5, R * 0.008);
+    lctx.strokeStyle = col(0.15, coreK * 0.9, 0.55 * coreK);
+    lctx.stroke();
+  }
+}
+
+/* --------------------------- 字符化上屏 --------------------------- */
+
+function styleFor(tb, lv, wb) {
+  const key = (tb * 16 + lv) * 3 + wb;
+  let s = styles.get(key);
+  if (s) return s;
+
+  const t = tb / 5;
+  const L = (lv + 0.5) / 16;
+  const w = [0, 0.32, 0.66][wb];
+
+  // 主色 = 暖色 A → 冷色 B 之间插值
+  const base = [0, 1, 2].map(i => lerp(PALETTE.a[i], PALETTE.b[i], t));
+
+  // 最亮的几档反相：亮底 + 暗字，暗场里会闪出几块亮砖
+  const hot = lv >= 13 && wb > 0;
+  const tileMix = hot ? 0.55 + w * 0.3 : 0;
+
+  const tile = base.map(v => lerp(v * 0.55, 246, tileMix));
+  const mixW = clamp(0.10 + L * 0.55 + w * 0.30, 0, 0.96);
+  const glyph = hot ? [14, 10, 8] : base.map(v => lerp(v, 255, mixW));
+
+  s = {
+    tile: 'rgba(' + tile.map(v => v | 0).join(',') + ',' + (hot ? 0.92 : 0.08 + L * 0.46).toFixed(3) + ')',
+    glyph: hot
+      ? 'rgb(' + glyph.map(v => v | 0).join(',') + ')'
+      : 'rgba(' + glyph.map(v => v | 0).join(',') + ',' + (0.40 + L * 0.58).toFixed(3) + ')'
+  };
+  styles.set(key, s);
+  return s;
+}
+
+function render() {
+  drawField();
+
+  const d = lctx.getImageData(0, 0, ow, oh).data;
+
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  ctx.fillStyle = PALETTE.bg;
+  ctx.fillRect(0, 0, W, H);
+
+  ctx.font = '500 ' + fs + 'px ' + getComputedStyle(document.body).getPropertyValue('--mono');
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+
+  const tx = cw / 2, ty = ch / 2 + 0.5;
+  const row = ow * 4;
+  const n = PETAL_RAMP.length;
+
+  for (let cy = 0; cy < rows; cy++) {
+    for (let cx = 0; cx < cols; cx++) {
+      // 2×2 超采样求平均
+      const i = (cy * SS * ow + cx * SS) * 4;
+      const a = (d[i]     + d[i + 4]     + d[i + row]     + d[i + row + 4])     / 1020;
+      const w = (d[i + 1] + d[i + 5]     + d[i + row + 1] + d[i + row + 5])     / 1020;
+      const b = (d[i + 2] + d[i + 6]     + d[i + row + 2] + d[i + row + 6])     / 1020;
+
+      const L = Math.min(1, a + b + w * 0.62);
+      if (L < 0.085) continue;
+
+      const tb = Math.round(b / (a + b + 1e-4) * 5);
+      const lv = Math.min(n - 1, (L * n) | 0);
+      const wb = w < 0.10 ? 0 : w < 0.30 ? 1 : 2;
+
+      const st = styleFor(tb, lv, wb);
+      const x = cx * cw, y = cy * ch;
+
+      if (lv >= 1) {
+        ctx.fillStyle = st.tile;
+        ctx.fillRect(x + 0.5, y + 0.5, cw - 1, ch - 1);
+      }
+
+      // 约 1.2 次/秒重选一次字形，让画面有极轻微的"活着"的抖动
+      const tick = Math.floor(time * 1.2 + ((cx * 7 + cy * 13) & 15) / 16);
+      const h = hash(cx, cy, tick);
+
+      ctx.fillStyle = st.glyph;
+      ctx.fillText(PETAL_RAMP[lv][h < 0.55 ? 0 : 1], x + tx, y + ty);
+    }
+  }
+
+  // ---- 花粉：稀疏的浮动颗粒，给静态的花一点空气感
+  ctx.font = '500 ' + Math.round(fs * 0.92) + 'px ui-monospace, Menlo, monospace';
+  for (const p of pollen) {
+    const px = Math.round(p.x / cw) * cw + tx;
+    const py = Math.round(p.y / ch) * ch + ty;
+    ctx.globalAlpha = p.a;
+    ctx.fillStyle = p.style;
+    ctx.fillText(p.g, px, py);
+  }
+  ctx.globalAlpha = 1;
+}
+
+/* ------------------------------ 花粉 ------------------------------ */
+
+function seedPollen() {
+  pollen = [];
+  const n = Math.round(clamp(W * H / 34000, 16, 60));
+  for (let i = 0; i < n; i++) {
+    pollen.push({
+      x: Math.random() * W,
+      y: Math.random() * H,
+      vx: 4 + Math.random() * 9,
+      vy: -2 - Math.random() * 6,
+      ph: Math.random() * Math.PI * 2,
+      a: 0.10 + Math.random() * 0.24,
+      g: POLLEN_RAMP[(Math.random() * POLLEN_RAMP.length) | 0],
+      style: Math.random() < 0.5 ? 'rgba(255,214,178,.9)' : 'rgba(226,160,196,.85)'
+    });
+  }
+}
+
+/* ------------------------------ 尺寸 ------------------------------ */
+
+function resize() {
+  dpr = Math.min(window.devicePixelRatio || 1, 2);
+  W = window.innerWidth;
+  H = window.innerHeight;
+
+  cv.width = Math.round(W * dpr);
+  cv.height = Math.round(H * dpr);
+  cv.style.width = W + 'px';
+  cv.style.height = H + 'px';
+
+  // 格子尺寸基本恒定，列数随视口变化
+  fs = W < 620 ? 10 : W < 1100 ? 11 : 12;
+  cw = Math.round(fs * 0.62);
+  ch = Math.round(fs * 1.30);
+
+  cols = Math.max(18, Math.floor(W / cw));
+  rows = Math.max(12, Math.floor(H / ch));
+
+  ow = cols * SS;
+  oh = rows * SS;
+  light.width = ow;
+  light.height = oh;
+
+  // 花的位置：宽屏偏左，窄屏居中偏上
+  if (W > 860) {
+    CX = W * 0.315;
+    CY = H * 0.50;
+    R = Math.min(W * 0.20, H * 0.31);
+  } else {
+    CX = W * 0.50;
+    CY = H * 0.36;
+    R = Math.min(W * 0.30, H * 0.20);
+  }
+
+  seedPollen();
+  styles.clear();
+
+  const elP = document.getElementById('s-petals');
+  const elG = document.getElementById('s-grid');
+  if (elP) elP.textContent = RINGS.reduce((s, r) => s + r.n, 0);
+  if (elG) elG.textContent = cols + '×' + rows;
+}
+
+/* ------------------------------ 主循环 ------------------------------ */
+
+function loop(now) {
+  raf = requestAnimationFrame(loop);
+  if (!last) { last = now; return; }
+  let dt = Math.min((now - last) / 1000, 0.1);
+  last = now;
+
+  acc += dt;
+  if (acc < 1 / TIMING.maxFps) return;
+  const step = acc;
+  acc = 0;
+  time += step;
+
+  // ---- 指针：目标值 + 平滑跟随（低通，避免生硬）
+  let tProx = 0;
+  if (ptr.active) {
+    const dx = ptr.x - CX, dy = ptr.y - CY;
+    const d = Math.hypot(dx, dy);
+    tProx = clamp(1 - d / (R * 2.7), 0, 1);
+    tProx = tProx * tProx * (3 - 2 * tProx);            // smoothstep，两端更柔和
+    if (d > 2) {
+      const tl = Math.atan2(dy, dx);
+      let dA = ((tl - lean + Math.PI * 3) % (Math.PI * 2)) - Math.PI;
+      lean += dA * Math.min(1, step * 4.5);
+    }
+  }
+  prox += (tProx - prox) * Math.min(1, step * 5.5);
+  pulse *= Math.pow(0.10, step);                        // 点击脉冲快速衰减
+
+  // 花粉漂移
+  for (const p of pollen) {
+    p.x += p.vx * step;
+    p.y += p.vy * step + Math.sin(time * 0.6 + p.ph) * 6 * step;
+    if (p.x > W + 20) { p.x = -20; p.y = Math.random() * H; }
+    if (p.y < -20) { p.y = H + 20; p.x = Math.random() * W; }
+  }
+
+  render();
+
+  const el = document.getElementById('s-bloom');
+  if (el) el.textContent = Math.round(clamp(shownOpen, 0, 1) * 100) + '%';
+}
+
+/* ------------------------------ 启动 ------------------------------ */
+
+window.addEventListener('resize', (() => {
+  let t = null;
+  return () => { clearTimeout(t); t = setTimeout(resize, 160); };
+})());
+
+document.addEventListener('visibilitychange', () => {
+  if (document.hidden) { cancelAnimationFrame(raf); raf = 0; }
+  else if (!raf) { last = 0; raf = requestAnimationFrame(loop); }
+});
+
+// ---- 指针：移动时更新位置，离开窗口时逐步回落
+window.addEventListener('pointermove', e => {
+  ptr.x = e.clientX;
+  ptr.y = e.clientY;
+  ptr.active = true;
+}, { passive: true });
+
+window.addEventListener('pointerleave', () => { ptr.active = false; });
+window.addEventListener('pointercancel', () => { ptr.active = false; });
+document.addEventListener('pointerleave', () => { ptr.active = false; });
+
+// ---- 点击：给一次绽放脉冲（不是硬跳相位，避免突兀）
+window.addEventListener('pointerdown', e => {
+  ptr.x = e.clientX;
+  ptr.y = e.clientY;
+  ptr.active = true;
+  if (e.target.closest('a')) return;
+  pulse = 1;
+});
+
+resize();
+
+const elBloom = document.getElementById('s-bloom');
+
+if (stillT >= 0) {
+  // ?t= 静帧模式：渲染指定时刻，方便截图与回归比对
+  time = stillT;
+  render();
+  if (elBloom) elBloom.textContent = Math.round(bloomAt(time) * 100) + '%';
+} else if (reduce.matches) {
+  // 系统开了「减少动态效果」：只画一张完全展开的静帧，不启动循环
+  time = TIMING.breathe * 0.5;
+  render();
+  if (elBloom) elBloom.textContent = '静止';
+  const hint = document.querySelector('.hint');
+  if (hint) hint.remove();
+} else {
+  raf = requestAnimationFrame(loop);
+}
+
+})();
+</script>
+</body>
+</html>

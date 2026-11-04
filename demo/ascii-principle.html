@@ -1,0 +1,1034 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>画面怎么变成字符 · ASCII 渲染原理</title>
+<style>
+  :root{
+    --bg:#FBFAF7;
+    --panel:#0B0D11;
+    --ink:#191814;
+    --ink-2:#4A463E;
+    --muted:#85807A;
+    --rule:#E6E2D9;
+    --accent:#B4513C;
+    --accent-soft:#F3E9E5;
+    --mono:ui-monospace,"SF Mono",SFMono-Regular,Menlo,Consolas,monospace;
+    --sans:"PingFang SC","Hiragino Sans GB","Microsoft YaHei",-apple-system,BlinkMacSystemFont,"Segoe UI",Helvetica,Arial,sans-serif;
+  }
+  *{box-sizing:border-box}
+  html{scroll-behavior:smooth}
+  body{
+    margin:0;background:var(--bg);color:var(--ink);
+    font-family:var(--sans);font-size:16px;line-height:1.75;
+    -webkit-font-smoothing:antialiased;
+  }
+  .wrap{max-width:1000px;margin:0 auto;padding:0 28px}
+
+  /* ---------- 头部 ---------- */
+  header{padding:96px 0 56px;border-bottom:1px solid var(--rule)}
+  .kicker{font-family:var(--mono);font-size:12px;letter-spacing:.14em;text-transform:uppercase;color:var(--accent);margin:0 0 22px}
+  h1{font-size:clamp(30px,5vw,50px);line-height:1.16;font-weight:600;letter-spacing:-.02em;margin:0 0 24px}
+  h1 em{font-style:normal;color:var(--accent)}
+  .lede{font-size:19px;color:var(--ink-2);max-width:640px;margin:0 0 36px}
+  .thesis{
+    border-left:3px solid var(--accent);padding:6px 0 6px 22px;
+    font-size:20px;line-height:1.7;max-width:660px;color:var(--ink);
+  }
+  .thesis b{background:var(--accent-soft);padding:1px 5px;border-radius:3px;font-weight:600}
+
+  /* ---------- 目录 ---------- */
+  nav.toc{padding:34px 0;border-bottom:1px solid var(--rule)}
+  nav.toc ol{list-style:none;margin:0;padding:0;display:flex;flex-wrap:wrap;gap:8px 28px}
+  nav.toc a{
+    font-family:var(--mono);font-size:13px;color:var(--ink-2);text-decoration:none;
+    display:inline-flex;gap:9px;align-items:baseline;padding:3px 0;
+  }
+  nav.toc a:hover{color:var(--accent)}
+  nav.toc a i{font-style:normal;color:var(--accent);font-size:11px}
+
+  /* ---------- 章节 ---------- */
+  section{padding:74px 0;border-bottom:1px solid var(--rule)}
+  .stepnum{font-family:var(--mono);font-size:12px;letter-spacing:.14em;color:var(--accent);margin:0 0 14px;display:block}
+  h2{font-size:clamp(22px,3.2vw,30px);line-height:1.3;font-weight:600;letter-spacing:-.01em;margin:0 0 18px}
+  h2 code{font-family:var(--mono);font-size:.82em;background:#F0EDE6;padding:2px 7px;border-radius:4px;font-weight:500}
+  section p{max-width:660px;color:var(--ink-2);margin:0 0 18px}
+  section p strong{color:var(--ink);font-weight:600}
+  .note{
+    max-width:660px;margin:26px 0 0;padding:16px 20px;
+    background:#F5F2EB;border-radius:10px;font-size:14.5px;color:var(--ink-2);line-height:1.7;
+  }
+  .note b{color:var(--accent);font-weight:600}
+  .note code{font-family:var(--mono);font-size:.9em;background:#E9E4D9;padding:1px 5px;border-radius:3px}
+
+  /* ---------- 演示区 ---------- */
+  .stage{
+    margin:34px 0 0;background:var(--panel);border-radius:14px;padding:18px;
+    box-shadow:0 24px 48px -30px rgba(30,20,10,.45);
+  }
+  .stage-grid{display:grid;gap:14px}
+  .g2{grid-template-columns:1fr 1fr}
+  .g3{grid-template-columns:1fr 1fr 1fr}
+  @media(max-width:720px){.g2,.g3{grid-template-columns:1fr}}
+  .cell{position:relative}
+  .cell canvas{display:block;width:100%;height:auto;border-radius:7px;background:#05070a}
+  .cell .tag{
+    position:absolute;top:8px;left:10px;font-family:var(--mono);font-size:10.5px;
+    letter-spacing:.08em;color:#8FA6B8;background:rgba(5,7,10,.72);
+    padding:2px 7px;border-radius:4px;pointer-events:none;
+  }
+  .cell .tag.warn{color:#F0A38C}
+
+  /* ---------- 控件 ---------- */
+  .controls{
+    display:flex;flex-wrap:wrap;gap:12px 26px;align-items:center;
+    margin:0 0 16px;padding:0 2px;
+  }
+  .ctl{display:flex;align-items:center;gap:10px;font-family:var(--mono);font-size:12px;color:#9FB0C0}
+  .ctl label{letter-spacing:.04em;white-space:nowrap}
+  .ctl output{color:#E8EDF2;min-width:44px;text-align:right;font-variant-numeric:tabular-nums}
+  input[type=range]{
+    -webkit-appearance:none;appearance:none;width:118px;height:3px;border-radius:2px;
+    background:#2A3340;outline:none;cursor:pointer;
+  }
+  input[type=range]::-webkit-slider-thumb{
+    -webkit-appearance:none;width:13px;height:13px;border-radius:50%;
+    background:#E8EDF2;border:2px solid #0B0D11;box-shadow:0 0 0 1px #46566A;cursor:grab;
+  }
+  .seg{display:inline-flex;background:#161C25;border-radius:6px;padding:2px}
+  .seg button{
+    font-family:var(--mono);font-size:11.5px;letter-spacing:.03em;color:#8496A8;
+    background:none;border:0;padding:5px 11px;border-radius:4px;cursor:pointer;
+  }
+  .seg button.on{background:#E8EDF2;color:#0B0D11}
+  .chk{display:inline-flex;align-items:center;gap:7px;cursor:pointer;font-family:var(--mono);font-size:12px;color:#9FB0C0}
+  .chk input{accent-color:#E8EDF2;cursor:pointer;margin:0}
+
+  /* ---------- 字符斜坡展示 ---------- */
+  .ramp{display:flex;flex-wrap:wrap;gap:6px;margin:22px 0 0}
+  .rc{
+    background:#F2EFE8;border-radius:8px;padding:9px 4px 7px;width:66px;text-align:center;
+    transition:transform .15s;
+  }
+  .rc:hover{transform:translateY(-2px)}
+  .rc .g{font-family:var(--mono);font-size:22px;line-height:1;color:#191814}
+  .rc .bar{height:26px;margin:7px auto 4px;background:#DED9CE;border-radius:2px;display:flex;align-items:flex-end;width:16px}
+  .rc .bar i{display:block;width:100%;background:var(--accent);border-radius:2px}
+  .rc .p{font-family:var(--mono);font-size:9.5px;color:var(--muted);letter-spacing:.02em}
+
+  /* ---------- 表格 ---------- */
+  table{width:100%;border-collapse:collapse;margin:26px 0 0;font-size:14.5px}
+  th,td{text-align:left;padding:11px 14px;border-bottom:1px solid var(--rule);vertical-align:top}
+  th{font-family:var(--mono);font-size:11.5px;letter-spacing:.08em;text-transform:uppercase;color:var(--muted);font-weight:400}
+  td:first-child{font-weight:600;color:var(--ink);white-space:nowrap}
+  td{color:var(--ink-2)}
+  .num{font-family:var(--mono);font-variant-numeric:tabular-nums;color:var(--accent)}
+
+  /* ---------- 页脚 ---------- */
+  footer{padding:64px 0 92px;color:var(--muted);font-size:14px}
+  footer p{max-width:640px}
+  kbd{font-family:var(--mono);font-size:12px;background:#F0EDE6;border:1px solid var(--rule);border-radius:4px;padding:1px 5px}
+
+  /* 顶部进度条 */
+  #prog{position:fixed;top:0;left:0;height:2px;background:var(--accent);width:0;z-index:50;transition:width .1s linear}
+</style>
+</head>
+<body>
+<div id="prog"></div>
+
+<div class="wrap">
+
+  <header>
+    <p class="kicker">ASCII rendering · 原理拆解</p>
+    <h1>一张画面，<br>是怎样变成<em>一片字符</em>的</h1>
+    <p class="lede">
+      从视频到字符画，中间没有魔法。它只做了一件事：<strong>把画面切成格子，用「一个字符有多黑」去代表「这一格有多亮」</strong>。
+      下面每一步都能现场调参数，你可以亲眼看到每个决定带来的后果。
+    </p>
+    <div class="thesis">
+      本质上这是<b>降维</b>：连续的灰度场 → 离散的字符密度等级。<br>
+      好看的原因不是字符，而是<b>你选择了哪套字符、怎么分级、怎么上色</b>。
+    </div>
+  </header>
+
+  <nav class="toc">
+    <ol>
+      <li><a href="#s1"><i>01</i>切成网格</a></li>
+      <li><a href="#s2"><i>02</i>每格取什么颜色</a></li>
+      <li><a href="#s3"><i>03</i>在哪里取平均</a></li>
+      <li><a href="#s4"><i>04</i>字符斜坡与断层</a></li>
+      <li><a href="#s5"><i>05</i>三种上色思路</a></li>
+      <li><a href="#s6"><i>06</i>把两个值塞进两个通道</a></li>
+      <li><a href="#s7"><i>07</i>为什么能跑到 30 帧</a></li>
+      <li><a href="#s8"><i>08</i>该选哪条路</a></li>
+    </ol>
+  </nav>
+
+  <!-- ============================================ 01 -->
+  <section id="s1">
+    <span class="stepnum">01 / 切成网格</span>
+    <h2>一个格子，只装一个字符</h2>
+    <p>
+      把画面横向切成 <code>cols</code> 份、纵向切成 <code>rows</code> 份，每一份就是一个格子。
+      一个格子最终只会输出<strong>一个字符</strong>——所以格子的数量，直接等于字符的数量，也直接等于画面能保留多少细节。
+    </p>
+    <p>
+      先看这条管线。左边是源画面（这里是程序画出来的，方便全程离线），中间是降采样后的采样结果，右边是字符化之后的样子。
+    </p>
+
+    <div class="stage">
+      <div class="controls">
+        <div class="ctl"><label>列数</label><input type="range" id="c1" min="24" max="180" value="96"><output id="o1">96</output></div>
+      </div>
+      <div class="stage-grid g3">
+        <div class="cell"><canvas id="a1src" width="360" height="212"></canvas><span class="tag">源画面</span></div>
+        <div class="cell"><canvas id="a1smp" width="360" height="212"></canvas><span class="tag">采样（每格一个色块）</span></div>
+        <div class="cell"><canvas id="a1out" width="360" height="212"></canvas><span class="tag">字符化结果</span></div>
+      </div>
+    </div>
+
+    <div class="note">
+      <b>第一个坑：字符不是正方形。</b>
+      等宽字体的一个字，宽高比大约是 <code>0.6 : 1</code>。如果你的格子按正方形算，画面会被横向压扁。
+      正确做法是先量出字宽，再反推列数——上面这个演示就是按真实字宽算的，所以你拉列数时画面比例不会变。
+    </div>
+  </section>
+
+  <!-- ============================================ 02 -->
+  <section id="s2">
+    <span class="stepnum">02 / 每格取什么颜色</span>
+    <h2>「取一个点」和「取一片面积」是两回事</h2>
+    <p>
+      格子落在画面上是一块面积，但你需要的是一个数字。最直觉的做法是取中心那一个像素——<strong>这是错的</strong>。
+    </p>
+    <p>
+      画面上到处都是细密的纹理（发丝、布料、噪点、边缘）。单点采样等于对这些纹理做随机抽样，
+      结果就是：<strong>画面自己不动，字符却在疯狂闪</strong>。这个现象叫走样（aliasing）。
+    </p>
+    <p>
+      下面的对比是同一帧、同一网格。关掉平滑时走的是最近邻采样，等于只取一个点；打开时浏览器会做面积平均。
+      盯住中间那块细纹理区域看。
+    </p>
+
+    <div class="stage">
+      <div class="controls">
+        <div class="ctl">
+          <label>采样方式</label>
+          <div class="seg" id="seg2">
+            <button data-v="point">单点采样</button>
+            <button data-v="area" class="on">面积平均</button>
+          </div>
+        </div>
+        <div class="ctl"><label>列数</label><input type="range" id="c2" min="30" max="200" value="104"><output id="o2">104</output></div>
+      </div>
+      <div class="stage-grid g2">
+        <div class="cell"><canvas id="a2a" width="440" height="240"></canvas><span class="tag" id="t2a">单点采样</span></div>
+        <div class="cell"><canvas id="a2b" width="440" height="240"></canvas><span class="tag" id="t2b">面积平均</span></div>
+      </div>
+    </div>
+
+    <div class="note">
+      面积平均的实现不用自己写循环。<b>把画面 <code>drawImage</code> 到一个只有 cols×rows 大的离屏画布上，浏览器就会自动做箱式滤波</b>——
+      这一步是免费的面积平均，也是整个方案能跑起来的性能基础。
+      只需要一个开关：<code>ctx.imageSmoothingEnabled = true</code>。
+    </div>
+  </section>
+
+  <!-- ============================================ 03 -->
+  <section id="s3">
+    <span class="stepnum">03 / 在哪里取平均</span>
+    <h2>混合光是线性的，混合像素值不是</h2>
+    <p>
+      「亮度要用 gamma 校正」是这类文章里最常被重复的一句话，但它<strong>对纯映射其实没用</strong>：
+      反 gamma 解码算亮度、再编码回显示，两次变换正好互相抵消，结果和直接取 sRGB 几乎一样。
+    </p>
+    <p>
+      真正会在这一步出问题的是<strong>平均</strong>。一个格子里往往一半亮一半暗，
+      你要把它压成一个数。而 <code>127.5</code> 这种"算术平均"在 sRGB 空间做，
+      和在线性空间做，结果差很多：
+    </p>
+
+    <div class="stage" style="padding:22px">
+      <div class="stage-grid g2">
+        <div class="cell" style="background:#0B0D11;border-radius:8px;padding:16px 18px">
+          <div style="font-family:var(--mono);font-size:11px;color:#8496A8;letter-spacing:.08em;margin-bottom:12px">在 sRGB 空间平均</div>
+          <div style="display:flex;align-items:center;gap:12px">
+            <div style="width:44px;height:44px;border-radius:3px;background:linear-gradient(45deg,#000 50%,#fff 50%)"></div>
+            <div style="font-family:var(--mono);font-size:13px;color:#8496A8">→</div>
+            <div id="sw1" style="width:44px;height:44px;border-radius:3px;background:#7F7F7F"></div>
+            <div style="font-family:var(--mono);font-size:12px;color:#E8EDF2">#7F7F7F · 127</div>
+          </div>
+        </div>
+        <div class="cell" style="background:#0B0D11;border-radius:8px;padding:16px 18px">
+          <div style="font-family:var(--mono);font-size:11px;color:#8496A8;letter-spacing:.08em;margin-bottom:12px">在线性空间平均</div>
+          <div style="display:flex;align-items:center;gap:12px">
+            <div style="width:44px;height:44px;border-radius:3px;background:linear-gradient(45deg,#000 50%,#fff 50%)"></div>
+            <div style="font-family:var(--mono);font-size:13px;color:#8496A8">→</div>
+            <div id="sw2" style="width:44px;height:44px;border-radius:3px;background:#BCBCBC"></div>
+            <div style="font-family:var(--mono);font-size:12px;color:#E8EDF2">#BCBCBC · 188</div>
+          </div>
+        </div>
+      </div>
+      <p style="font-family:var(--mono);font-size:11.5px;color:#6E7F90;margin:14px 2px 0;max-width:none">
+        同样的「一半黑一半白」，两种空间给出的数差了 61 级
+      </p>
+    </div>
+
+    <p style="margin-top:26px">
+      <strong>一半黑一半白，观感上应该偏亮（188），而不是中灰（127）。</strong>
+      所以在 sRGB 空间做平均，会把所有细小的亮部压暗——细线、高光、发丝会先消失。
+      下面的对比就是这个后果：左边是浏览器默认（sRGB 平均），右边是在线性空间里求平均后再编码回去。
+    </p>
+
+    <div class="stage">
+      <div class="stage-grid g2">
+        <div class="cell"><canvas id="a3a" width="440" height="240"></canvas><span class="tag warn">sRGB 空间平均 · 亮部被压暗</span></div>
+        <div class="cell"><canvas id="a3b" width="440" height="240"></canvas><span class="tag">线性空间平均 · 亮部保留</span></div>
+      </div>
+    </div>
+
+    <div class="note">
+      <b>什么时候真的必须在意 gamma：</b>只要是「把多个光混在一起」的场合——面积平均、加法混合、
+      模糊、发光叠加。反过来，单纯拿一个像素算亮度再查字符表，做不做 gamma 几乎看不出来。
+    </div>
+  </section>
+
+  <!-- ============================================ 04 -->
+  <section id="s4">
+    <span class="stepnum">04 / 字符斜坡与断层</span>
+    <h2>字符的「墨水浓度」并不均匀</h2>
+    <p>
+      亮度是连续的，字符是离散的。所以需要一张表，把 0→1 的亮度切成若干档，每档对应一个字符。
+      这张表叫字符斜坡（ramp）。
+    </p>
+    <p>
+      但这里有个隐蔽的问题：<strong>字符的墨水覆盖率分布极不均匀</strong>。
+      下面我把候选字符真正渲染出来、量了每个字符的覆盖率。你会看到 <code>@ # 8 S X</code> 挤在很窄的高位，
+      而 <code>. , ' ;</code> 全都趴在接近 0 的地方。
+    </p>
+
+    <div class="ramp" id="rampOut"></div>
+
+    <p style="margin-top:34px">
+      如果你老老实实按字符顺序当阶梯用，中灰区域就会出现明显的<strong>断层</strong>——亮度只变了一点，字符却跳了一档。
+      下面两个条带对比了两种处理：左：一档一个字；右：每档两个字，用哈希伪随机选。
+    </p>
+
+    <div class="stage">
+      <div class="stage-grid g2">
+        <div class="cell"><canvas id="a4a" width="440" height="150"></canvas><span class="tag warn">一档一字 → 看得出来台阶</span></div>
+        <div class="cell"><canvas id="a4b" width="440" height="150"></canvas><span class="tag">一档两字 + 哈希 → 台阶消失</span></div>
+      </div>
+    </div>
+
+    <div class="note">
+      右边这招很省事：不用重排字符，只要给每档准备两个字，用哈希按格子选。
+      视觉上相当于给亮度加了抖动（dither），过渡立刻顺了。
+    </div>
+  </section>
+
+  <!-- ============================================ 05 -->
+  <section id="s5">
+    <span class="stepnum">05 / 三种上色思路</span>
+    <h2>字符是骨架，颜色决定气质</h2>
+    <p>
+      字符只负责「形状感」，气质几乎全由颜色决定。下面是同一个画面、同一套字符斜坡下的三种做法：
+    </p>
+
+    <div class="stage">
+      <div class="controls">
+        <div class="ctl">
+          <label>策略</label>
+          <div class="seg" id="seg5">
+            <button data-v="mono" class="on">A 单色</button>
+            <button data-v="sample">B 逐字取色</button>
+            <button data-v="chip">C 色块 + 反白</button>
+          </div>
+        </div>
+      </div>
+      <div class="stage-grid g3">
+        <div class="cell"><canvas id="a5a" width="300" height="180"></canvas><span class="tag">A 单色终端</span></div>
+        <div class="cell"><canvas id="a5b" width="300" height="180"></canvas><span class="tag">B 逐字取色</span></div>
+        <div class="cell"><canvas id="a5c" width="300" height="180"></canvas><span class="tag">C 色块反白</span></div>
+      </div>
+    </div>
+
+    <table>
+      <tr><th>策略</th><th>做法</th><th>气质 / 代价</th></tr>
+      <tr><td>A 单色</td><td>所有字符同一颜色</td><td>最克制、最像终端；信息最少，靠字符密度撑画面</td></tr>
+      <tr><td>B 逐字取色</td><td>每个字符用自己的采样色</td><td>最还原原画面，但容易糊、失去「字符感」</td></tr>
+      <tr><td>C 色块反白</td><td>先铺一层淡色块，再用近白色画字符</td><td>最有块面感，最「设计」；最亮处可反相成亮底暗字</td></tr>
+    </table>
+
+    <div class="note">
+      C 的<b>反相</b>是点睛之笔：在最亮的几档把「暗底亮字」翻成「亮底暗字」，
+      暗色页面里会突然出现几块亮砖，层次一下就出来了。
+    </div>
+  </section>
+
+  <!-- ============================================ 06 -->
+  <section id="s6">
+    <span class="stepnum">06 / 把两个值塞进两个通道</span>
+    <h2>一个「颜色」可以当两个标量用</h2>
+    <p>
+      这是整套技法里最漂亮的一招。当你要在离屏画布上<strong>叠加</strong>很多半透明形状
+      （<code>globalCompositeOperation = 'lighter'</code>），颜色会被加法搅拌成一团，之后再也分不开。
+    </p>
+    <p>
+      但如果你需要同时保留两个互相独立的量——比如「总强度 k」和「色相混合比 m」——可以把它们分别编码进 R 和 B：
+    </p>
+
+    <div class="stage">
+      <div class="controls">
+        <div class="ctl">
+          <label>显示</label>
+          <div class="seg" id="seg6">
+            <button data-v="composite" class="on">叠加结果</button>
+            <button data-v="r">R 通道</button>
+            <button data-v="b">B 通道</button>
+            <button data-v="decode">解码</button>
+          </div>
+        </div>
+      </div>
+      <div class="stage-grid g2">
+        <div class="cell"><canvas id="a6a" width="440" height="240"></canvas><span class="tag" id="t6">加法叠加后</span></div>
+        <div class="cell"><canvas id="a6b" width="440" height="240"></canvas><span class="tag" id="t6b">字符化结果</span></div>
+      </div>
+    </div>
+
+    <p style="margin-top:26px">
+      公式只有三行，但含义很关键：
+    </p>
+    <div class="note" style="font-family:var(--mono);font-size:13.5px;line-height:2">
+      R = (1 − m) · k &nbsp;&nbsp;冷色分量<br>
+      B = m · k &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;暖色分量<br>
+      G = w &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;白度 / 高光
+    </div>
+    <p style="margin-top:26px">
+      叠加发生在这个编码之后，所以加法是分开作用在 R 和 B 上的。解的时候：
+    </p>
+    <div class="note" style="font-family:var(--mono);font-size:13.5px;line-height:2">
+      R + B = k &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;→ 总强度，拿去查字符档位<br>
+      B / (R + B) = m &nbsp;→ 混合比，拿去查色相
+    </div>
+
+    <div class="note">
+      换句话说：<b>这不是一张图片，而是一个数据容器</b>。三个通道各存一个标量。
+      只要在解码端知道约定，加法混合就破坏不了它。
+    </div>
+  </section>
+
+  <!-- ============================================ 07 -->
+  <section id="s7">
+    <span class="stepnum">07 / 为什么能跑到 30 帧</span>
+    <h2>性能不在算法，在「少做」</h2>
+    <p>
+      一屏几百上千个格子，如果每帧每个格子都 <code>fillText</code> 一次，加上拼颜色字符串，
+      开销会迅速吃掉帧预算。真正有效的做法几乎都不是优化单次绘制，而是<strong>减少绘制次数</strong>。
+    </p>
+
+    <table>
+      <tr><th>手法</th><th>省掉了什么</th><th>量级</th></tr>
+      <tr><td>锁 30fps</td><td>一半的帧根本不渲染</td><td class="num">2×</td></tr>
+      <tr><td>只画亮格</td><td><code>L &lt; 0.06</code> 直接跳过，大面积暗部零成本</td><td class="num">3–10×</td></tr>
+      <tr><td>量化 + 缓存样式串</td><td>把 (色相, 亮度, 白度) 压成几百个 key，<code>rgba()</code> 只拼一次</td><td class="num">5–20×</td></tr>
+      <tr><td>小离屏画布</td><td>降采样交给浏览器，不用自己遍历像素</td><td class="num">10–100×</td></tr>
+      <tr><td>字形图集</td><td>用 <code>drawImage</code> 替代 <code>fillText</code>（列数 200+ 或要 60fps 时才必要）</td><td class="num">3–10×</td></tr>
+    </table>
+
+    <div class="stage">
+      <div class="controls">
+        <div class="ctl"><label>实时帧耗时</label><output id="perf" style="min-width:78px">—</output></div>
+        <div class="ctl"><label>列数</label><input type="range" id="c7" min="40" max="260" value="120"><output id="o7">120</output></div>
+      </div>
+      <div class="stage-grid">
+        <div class="cell"><canvas id="a7" width="912" height="300"></canvas><span class="tag">拖动列数，观察耗时与观感的变化</span></div>
+      </div>
+    </div>
+
+    <div class="note">
+      注意：<b>列数不是越多越好</b>。列数翻倍，字符数量翻四倍，但细节增益远小于成本，
+      而且字符会小到认不出来——「字符感」反而丢了。多数好看的实现落在 90–140 列之间。
+    </div>
+  </section>
+
+  <!-- ============================================ 08 -->
+  <section id="s8">
+    <span class="stepnum">08 / 该选哪条路</span>
+    <h2>视频只是其中一种素材来源</h2>
+    <p>
+      回到最常被问的那个问题：那些漂亮的 ASCII 效果页面，是「视频 + 滤镜」做的吗？
+      答案是<strong>很少</strong>——它只是「往小画布上画什么」这一层的不同选择而已。
+    </p>
+
+    <table>
+      <tr><th>源</th><th>做法</th><th>什么时候用</th></tr>
+      <tr><td>程序化形状</td><td>用数学直接画进小画布（圆形、贝塞尔、噪声、粒子）</td><td>最常见。零素材、可控、可交互、分辨率无关</td></tr>
+      <tr><td>静态图</td><td>图片 ASCII 化一次，之后只动字符层</td><td>文本型首屏。重活只干一次，极省</td></tr>
+      <tr><td>3D 场景</td><td>渲到 render target，再字符化</td><td>要立体感、要旋转</td></tr>
+      <tr><td>真视频 / 摄像头</td><td><code>drawImage(video)</code> 每帧采样</td><td>内容复杂度不受限，代价是体积、自动播放限制、耗电</td></tr>
+    </table>
+
+    <p style="margin-top:28px">
+      判断你正在看的页面属于哪种，按这个顺序查：
+    </p>
+    <div class="note">
+      ① Network 里有没有 <code>.mp4 / .webm</code> 请求 → 有就是视频源<br>
+      ② 缩放页面：字符密度随视口连续变化 → 实时采样；纹丝不动只是放大 → 预烘焙<br>
+      ③ 动鼠标：ASCII 跟着变形、避让 → 一定有程序化逻辑<br>
+      ④ 看字符集：标准 <code>" .:-=+*#%@"</code> → 多半是通用库；策展过的混排 → 定制的
+    </div>
+  </section>
+
+  <footer>
+    <p>
+      这一页本身也是同一套技术的产物：所有演示画面都是<span style="color:var(--accent)">程序化生成</span>的，
+      没有任何图片或视频素材，也没有引入任何库。滚动、拖动滑块时它在实时重算。
+    </p>
+    <p style="margin-top:14px">
+      想要一份带完整代码注释的可运行实例，看 <kbd>demo/jelly-ascii.html</kbd>。
+    </p>
+  </footer>
+
+</div>
+
+<script>
+(() => {
+'use strict';
+
+/* ============================== 通用工具 ============================== */
+
+const RAMP = '.:-=+*#%@';
+const RAMP2 = [
+  ['.', ','], [':', '.'], ["'", '`'], [':', "'"], [';', ':'],
+  ['o', ';'], ['t', 'o'], ['*', 't'], ['%', '*'], ['S', '%'],
+  ['X', 'S'], ['8', 'X'], ['@', '8'], ['#', '@']
+];
+const MONO = 'ui-monospace,"SF Mono",Menlo,Consolas,monospace';
+
+const $ = s => document.querySelector(s);
+
+function mkCanvas(w, h) {
+  const c = document.createElement('canvas');
+  c.width = w; c.height = h;
+  return c;
+}
+
+/* ---------------------- 源画面（程序生成，无素材） ---------------------- */
+
+const SRC_W = 480, SRC_H = 300;
+const srcCanvas = mkCanvas(SRC_W, SRC_H);
+const srcCtx = srcCanvas.getContext('2d');
+
+function drawSource(t) {
+  const g = srcCtx;
+  const W = SRC_W, H = SRC_H;
+  g.setTransform(1, 0, 0, 1, 0, 0);
+  g.clearRect(0, 0, W, H);
+
+  // 深色底 + 缓慢移动的渐变，给暗部层次
+  const bg = g.createLinearGradient(0, 0, W, H);
+  bg.addColorStop(0, '#1c2733');
+  bg.addColorStop(0.45, '#243242');
+  bg.addColorStop(1, '#121a24');
+  g.fillStyle = bg;
+  g.fillRect(0, 0, W, H);
+
+  // 主光球：霓虹青 + 紫，随时间游走
+  const cx = W * (0.5 + 0.13 * Math.sin(t * 0.55));
+  const cy = H * (0.46 + 0.11 * Math.cos(t * 0.42));
+  const R = Math.min(W, H) * 0.40;
+
+  const rg = g.createRadialGradient(cx, cy, 0, cx, cy, R);
+  rg.addColorStop(0.00, 'rgba(190,255,255,0.98)');
+  rg.addColorStop(0.18, 'rgba(110,230,240,0.80)');
+  rg.addColorStop(0.45, 'rgba(80,170,215,0.50)');
+  rg.addColorStop(0.75, 'rgba(100,100,205,0.24)');
+  rg.addColorStop(1.00, 'rgba(0,0,0,0)');
+  g.fillStyle = rg;
+  g.fillRect(0, 0, W, H);
+
+  // 第二团暖色，制造色相变化（第 6 步要用）
+  const cx2 = W * (0.5 + 0.2 * Math.cos(t * 0.38 + 1.7));
+  const cy2 = H * (0.55 + 0.14 * Math.sin(t * 0.5 + 0.9));
+  const rg2 = g.createRadialGradient(cx2, cy2, 0, cx2, cy2, R * 0.85);
+  rg2.addColorStop(0.00, 'rgba(255,180,220,0.75)');
+  rg2.addColorStop(0.5, 'rgba(180,110,230,0.30)');
+  rg2.addColorStop(1.00, 'rgba(0,0,0,0)');
+  g.fillStyle = rg2;
+  g.fillRect(0, 0, W, H);
+
+  // 细密纹理环：专用来暴露「单点采样」的闪烁
+  g.save();
+  g.translate(cx, cy);
+  g.globalCompositeOperation = 'lighter';
+  for (let i = 0; i < 26; i++) {
+    const a = (i / 26) * Math.PI * 2 + t * 0.32;
+    const rr = R * (0.55 + 0.42 * ((i * 37) % 11) / 11);
+    g.beginPath();
+    g.arc(Math.cos(a) * rr * 0.75, Math.sin(a) * rr * 0.6, 1.1 + (i % 3) * 0.5, 0, 6.2832);
+    g.fillStyle = 'rgba(200,245,255,' + (0.35 + (i % 4) * 0.14) + ')';
+    g.fill();
+  }
+  g.restore();
+
+  // 一圈亮环，让边缘结构清晰
+  g.beginPath();
+  g.ellipse(cx, cy, R * 0.72, R * 0.60, 0.35, 0, 6.2832);
+  g.strokeStyle = 'rgba(230,255,255,0.55)';
+  g.lineWidth = 1.4;
+  g.stroke();
+
+  // 高对比细线（采样 / gamma 的照妖镜）
+  g.save();
+  g.globalCompositeOperation = 'lighter';
+  g.strokeStyle = 'rgba(120,220,255,0.30)';
+  g.lineWidth = 1;
+  for (let y = 0; y < H; y += 5) {
+    g.beginPath();
+    g.moveTo(0, y + Math.sin((y + t * 40) * 0.06) * 3);
+    g.lineTo(W, y + Math.cos((y + t * 30) * 0.05) * 3);
+    g.stroke();
+  }
+  g.restore();
+}
+
+/* ---------------------- ASCII 渲染核心 ---------------------- */
+
+// 把 srcCanvas 采样成 cols × rows 的像素数据
+function sample(src, cols, rows, smooth) {
+  const c = mkCanvas(cols, rows);
+  const g = c.getContext('2d', { willReadFrequently: true });
+  g.imageSmoothingEnabled = smooth;
+  g.imageSmoothingQuality = 'high';
+  g.drawImage(src, 0, 0, cols, rows);
+  return g.getImageData(0, 0, cols, rows).data;
+}
+
+// 线性空间平均：先用 2× 降采样拿 4 个样本，再在 linear 空间求平均、编码回去
+function sampleLinear(src, cols, rows) {
+  const SS2 = 2, w = cols * SS2, h = rows * SS2;
+  const c = mkCanvas(w, h);
+  const g = c.getContext('2d', { willReadFrequently: true });
+  g.imageSmoothingEnabled = true;
+  g.drawImage(src, 0, 0, w, h);
+  const d = g.getImageData(0, 0, w, h).data;
+  const out = new Uint8ClampedArray(cols * rows * 4);
+  const n = SS2 * SS2;
+  for (let y = 0; y < rows; y++) {
+    for (let x = 0; x < cols; x++) {
+      let lr = 0, lg = 0, lb = 0;
+      for (let dy = 0; dy < SS2; dy++) {
+        for (let dx = 0; dx < SS2; dx++) {
+          const i = ((y * SS2 + dy) * w + (x * SS2 + dx)) * 4;
+          lr += Math.pow(d[i] / 255, 2.2);
+          lg += Math.pow(d[i + 1] / 255, 2.2);
+          lb += Math.pow(d[i + 2] / 255, 2.2);
+        }
+      }
+      const o = (y * cols + x) * 4;
+      out[o]     = Math.pow(lr / n, 1 / 2.2) * 255;
+      out[o + 1] = Math.pow(lg / n, 1 / 2.2) * 255;
+      out[o + 2] = Math.pow(lb / n, 1 / 2.2) * 255;
+      out[o + 3] = 255;
+    }
+  }
+  return out;
+}
+
+// 亮度：sRGB 或线性
+function luma(r, g, b, linear) {
+  if (linear) {
+    const R = Math.pow(r / 255, 2.2), G = Math.pow(g / 255, 2.2), B = Math.pow(b / 255, 2.2);
+    return 0.2126 * R + 0.7152 * G + 0.0722 * B;
+  }
+  return (0.2126 * r + 0.7152 * g + 0.0722 * b) / 255;
+}
+
+/* ---------------------- 每个演示的渲染器 ---------------------- */
+
+// 给一个目标列数，反推整套网格：列数固定，字高按字符宽高比推出，最后拉伸填满画布
+function gridFor(cv, cols) {
+  const W = cv.width, H = cv.height;
+  const cw = W / cols;
+  let ch = cw / 0.62;                    // 等宽字符宽高比 ≈ 0.62:1
+  const rows = Math.max(1, Math.floor(H / ch));
+  ch = H / rows;                         // 让纵向正好铺满
+  return { cols, rows, cw, ch };
+}
+
+function paintAscii(cv, cols, opt) {
+  opt = opt || {};
+  const ctx = cv.getContext('2d');
+  const W = cv.width, H = cv.height;
+  const gr = gridFor(cv, cols);
+  const { rows, cw, ch } = gr;
+
+  const data = opt.data || sample(srcCanvas, cols, rows, opt.smooth !== false);
+
+  ctx.fillStyle = '#05070a';
+  ctx.fillRect(0, 0, W, H);
+  ctx.font = '600 ' + Math.round(ch * 0.96) + 'px ' + MONO;
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+
+  const ramp = opt.ramp || RAMP;
+  const linear = opt.linear !== false;
+  const mode = opt.mode || 'mono';
+  const n = opt.levels || ramp.length;
+
+  for (let y = 0; y < rows; y++) {
+    for (let x = 0; x < cols; x++) {
+      const i = (y * cols + x) * 4;
+      const r = data[i], g = data[i + 1], b = data[i + 2];
+      let L = luma(r, g, b, linear);
+      if (L < 0.028) continue;
+
+      const lv = Math.min(n - 1, Math.max(0, Math.round(L * (n - 1))));
+      let ch1 = ramp[lv];
+      if (opt.dither) {
+        const h = ((x * 73856093) ^ (y * 19349663)) >>> 0;
+        if ((h % 100) < 50) ch1 = ramp[Math.min(n - 1, lv + 1)] || ch1;
+      }
+
+      const px = x * cw, py = y * ch;
+
+      if (mode === 'chip') {
+        ctx.fillStyle = 'rgba(' + r + ',' + g + ',' + b + ',' + (0.10 + L * 0.42).toFixed(2) + ')';
+        ctx.fillRect(px, py, cw - 0.6, ch - 0.6);
+        ctx.fillStyle = 'rgba(246,250,255,' + (0.35 + L * 0.62).toFixed(2) + ')';
+      } else if (mode === 'sample') {
+        ctx.fillStyle = 'rgb(' + Math.min(255, r * 1.3 | 0) + ','
+                                + Math.min(255, g * 1.3 | 0) + ','
+                                + Math.min(255, b * 1.3 | 0) + ')';
+      } else {
+        ctx.fillStyle = 'rgba(198,232,245,' + (0.52 + L * 0.46).toFixed(2) + ')';
+      }
+      ctx.fillText(ch1, px + cw / 2, py + ch / 2 + 0.5);
+    }
+  }
+  return gr;
+}
+
+/* ============================== 01 ============================== */
+
+const a1src = $('#a1src'), a1smp = $('#a1smp'), a1out = $('#a1out');
+let c1 = 96;
+
+function paint1() {
+  const g = a1src.getContext('2d');
+  g.clearRect(0, 0, a1src.width, a1src.height);
+  g.drawImage(srcCanvas, 0, 0, a1src.width, a1src.height);
+
+  const gr = gridFor(a1smp, c1);
+  const { rows, cols } = gr;
+
+  // 中间：把采样结果放大成色块，直接看到「一格一个色」
+  const d = sample(srcCanvas, cols, rows, true);
+  const g2 = a1smp.getContext('2d');
+  g2.fillStyle = '#05070a';
+  g2.fillRect(0, 0, a1smp.width, a1smp.height);
+  const bw = a1smp.width / cols, bh = a1smp.height / rows;
+  for (let y = 0; y < rows; y++) {
+    for (let x = 0; x < cols; x++) {
+      const i = (y * cols + x) * 4;
+      g2.fillStyle = 'rgb(' + d[i] + ',' + d[i + 1] + ',' + d[i + 2] + ')';
+      g2.fillRect(x * bw, y * bh, Math.ceil(bw), Math.ceil(bh));
+    }
+  }
+
+  paintAscii(a1out, c1, {});
+}
+
+/* ============================== 02 ============================== */
+
+let c2 = 104, mode2 = 'area';
+
+function paint2() {
+  paintAscii($('#a2a'), c2, { ch: 11, smooth: false });
+  paintAscii($('#a2b'), c2, { ch: 11, smooth: true });
+  $('#t2a').textContent = mode2 === 'point' ? '单点采样（当前）' : '单点采样';
+  $('#t2b').textContent = mode2 === 'area' ? '面积平均（当前）' : '面积平均';
+}
+
+/* ============================== 03 ============================== */
+
+function paint3() {
+  const ca = $('#a3a'), cb = $('#a3b');
+  const gr = gridFor(ca, 110);
+  const { rows, cols } = gr;
+
+  // 左：浏览器默认，在 sRGB 空间做平均
+  paintAscii(ca, 110, { data: sample(srcCanvas, cols, rows, true), linear: false, levels: 14 });
+  // 右：先在线性空间求平均，再编码回去
+  paintAscii(cb, 110, { data: sampleLinear(srcCanvas, cols, rows), linear: false, levels: 14 });
+}
+
+/* ============================== 04 ============================== */
+
+// 量出每个候选字符的真实墨水覆盖率
+function inkCoverage(chr) {
+  const s = 40;
+  const c = mkCanvas(s, s);
+  const g = c.getContext('2d');
+  g.fillStyle = '#fff';
+  g.font = '600 34px ' + MONO;
+  g.textAlign = 'center';
+  g.textBaseline = 'middle';
+  g.fillText(chr, s / 2, s / 2);
+  const d = g.getImageData(0, 0, s, s).data;
+  let sum = 0;
+  for (let i = 3; i < d.length; i += 4) sum += d[i];
+  return sum / (s * s * 255);
+}
+
+function buildRampViz() {
+  const cands = [' ', '.', ',', "'", ':', ';', 'o', 't', '*', '%', 'S', 'X', '8', '@', '#'];
+  const measured = cands.map(c => ({ c, v: inkCoverage(c) }));
+  const max = Math.max(...measured.map(m => m.v)) || 1;
+  const host = $('#rampOut');
+  host.innerHTML = '';
+  measured.forEach(m => {
+    const el = document.createElement('div');
+    el.className = 'rc';
+    el.innerHTML =
+      '<div class="g">' + (m.c === ' ' ? '␣' : m.c.replace('<', '&lt;')) + '</div>' +
+      '<div class="bar"><i style="height:' + Math.max(2, (m.v / max) * 100) + '%"></i></div>' +
+      '<div class="p">' + (m.v * 100).toFixed(1) + '%</div>';
+    host.appendChild(el);
+  });
+}
+
+// 断层对比：横条渐变，左一档一字 / 右一档两字哈希
+function paint4() {
+  [['#a4a', false], ['#a4b', true]].forEach(([sel, dither]) => {
+    const cv = $(sel);
+    const ctx = cv.getContext('2d', { willReadFrequently: true });
+    const W = cv.width, H = cv.height;
+    ctx.fillStyle = '#05070a';
+    ctx.fillRect(0, 0, W, H);
+
+    const ch = 13, cw = 13;
+    const rows = Math.floor(H / ch), cols = Math.floor(W / cw);
+    ctx.font = '600 12px ' + MONO;
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+
+    for (let x = 0; x < cols; x++) {
+      // 横向从黑到白的平滑渐变
+      const tt = x / (cols - 1);
+      const L = Math.pow(tt, 1);
+      const lv = Math.min(RAMP2.length - 1, Math.round(L * (RAMP2.length - 1)));
+      for (let y = 0; y < rows; y++) {
+        let pair = RAMP2[lv];
+        let g;
+        if (dither) {
+          const h = ((x * 73856093) ^ (y * 19349663)) >>> 0;
+          g = pair[h % 2];
+        } else {
+          g = pair[0];
+        }
+        const a = 0.30 + L * 0.70;
+        ctx.fillStyle = 'rgba(210,238,250,' + a.toFixed(2) + ')';
+        ctx.fillText(g, x * cw + cw / 2, y * ch + ch / 2);
+      }
+    }
+  });
+}
+
+/* ============================== 05 ============================== */
+
+let mode5 = 'mono';
+
+function paint5() {
+  paintAscii($('#a5a'), 56, { ch: 13, mode: 'mono' });
+  paintAscii($('#a5b'), 56, { ch: 13, mode: 'sample' });
+  paintAscii($('#a5c'), 56, { ch: 13, mode: 'chip' });
+}
+
+/* ============================== 06 ============================== */
+
+let mode6 = 'composite';
+
+// 用 col(m,k,w) 的编码方式，把 m 和 k 分别放进 B / R 通道
+function colEnc(m, k, w) {
+  return 'rgb(' + Math.min(255, (1 - m) * k * 255) + ','
+                + Math.min(255, w * 255) + ','
+                + Math.min(255, m * k * 255) + ')';
+}
+
+function paint6(t) {
+  const W = 440, H = 240;
+  const off = mkCanvas(W, H);
+  const g = off.getContext('2d', { willReadFrequently: true });
+
+  g.globalCompositeOperation = 'source-over';
+  g.fillStyle = '#000';
+  g.fillRect(0, 0, W, H);
+  g.globalCompositeOperation = 'lighter';
+
+  // 三团叠加光斑，每团有自己的 m（色相比）和 k（强度）
+  const blobs = [
+    { x: 0.36 + 0.06 * Math.sin(t * 0.6), y: 0.44, m: 0.18, k: 0.95, r: 0.36 },
+    { x: 0.62 + 0.07 * Math.cos(t * 0.45), y: 0.52, m: 0.86, k: 0.85, r: 0.32 },
+    { x: 0.50 + 0.10 * Math.sin(t * 0.3 + 2), y: 0.44 + 0.08 * Math.cos(t * 0.5), m: 0.55, k: 0.7, r: 0.24 }
+  ];
+  for (const b of blobs) {
+    const cx = b.x * W, cy = b.y * H, rr = b.r * Math.min(W, H);
+    const grd = g.createRadialGradient(cx, cy, 0, cx, cy, rr);
+    grd.addColorStop(0.00, colEnc(b.m, b.k, 0.10));
+    grd.addColorStop(0.55, colEnc(b.m, b.k * 0.45, 0.03));
+    grd.addColorStop(1.00, colEnc(b.m, 0, 0));
+    g.fillStyle = grd;
+    g.beginPath();
+    g.arc(cx, cy, rr, 0, 6.2832);
+    g.fill();
+  }
+
+  const d = g.getImageData(0, 0, W, H).data;
+
+  // 左面板：按模式显示
+  const cA = $('#a6a'), ctxA = cA.getContext('2d');
+  const img = ctxA.createImageData(W, H);
+  const out = img.data;
+  for (let i = 0; i < d.length; i += 4) {
+    const R = d[i], G = d[i + 1], B = d[i + 2];
+    if (mode6 === 'composite') {
+      out[i] = R; out[i + 1] = G; out[i + 2] = B; out[i + 3] = 255;
+    } else if (mode6 === 'r') {
+      out[i] = out[i + 1] = out[i + 2] = R; out[i + 3] = 255;
+    } else if (mode6 === 'b') {
+      out[i] = out[i + 1] = out[i + 2] = B; out[i + 3] = 255;
+    } else {
+      // 解码：总强度 k = R+B，色相 m = B/(R+B)
+      const k = Math.min(1, (R + B) / 255);
+      const m = (R + B) > 2 ? B / (R + B) : 0;
+      // 色相当成红→蓝的着色，强度当亮度
+      out[i] = (60 + 195 * m) * k;
+      out[i + 1] = (60 + 120 * (1 - Math.abs(m - 0.5) * 2)) * k;
+      out[i + 2] = (255 - 195 * m) * k;
+      out[i + 3] = 255;
+    }
+  }
+  ctxA.putImageData(img, 0, 0);
+
+  const tags = { composite: '加法叠加后', r: 'R 通道 = (1−m)·k', b: 'B 通道 = m·k', decode: '解码：强度 + 色相' };
+  $('#t6').textContent = tags[mode6];
+
+  // 右面板：把解码结果字符化
+  const cB = $('#a6b'), ctxB = cB.getContext('2d');
+  const ch = 11, cw = 7;
+  const rows = Math.floor(H / ch), cols = Math.floor(W / cw);
+  ctxB.fillStyle = '#05070a';
+  ctxB.fillRect(0, 0, W, H);
+  ctxB.font = '600 10px ' + MONO;
+  ctxB.textAlign = 'center';
+  ctxB.textBaseline = 'middle';
+
+  for (let y = 0; y < rows; y++) {
+    for (let x = 0; x < cols; x++) {
+      const sx = Math.min(W - 1, x * cw), sy = Math.min(H - 1, y * ch);
+      const i = (sy * W + sx) * 4;
+      const R = d[i], B = d[i + 2], G = d[i + 1];
+      const k = Math.min(1, (R + B) / 255);
+      const m = (R + B) > 2 ? B / (R + B) : 0;
+      const L = Math.min(1, k + G / 255 * 0.5);
+      if (L < 0.05) continue;
+      const lv = Math.min(RAMP2.length - 1, Math.round(L * (RAMP2.length - 1)));
+      const hh = ((x * 73856093) ^ (y * 19349663)) >>> 0;
+      const gch = RAMP2[lv][hh % 2];
+      // 色相 m 决定青 ↔ 紫
+      const r2 = Math.round(110 + 120 * (1 - m));
+      const g2 = Math.round(210 + 35 * (1 - Math.abs(m - 0.5) * 2));
+      const b2 = Math.round(250 - 90 * (1 - m));
+      ctxB.fillStyle = 'rgba(' + r2 + ',' + g2 + ',' + b2 + ',' + (0.35 + L * 0.62).toFixed(2) + ')';
+      ctxB.fillText(gch, x * cw + cw / 2, y * ch + ch / 2);
+    }
+  }
+}
+
+/* ============================== 07 ============================== */
+
+let c7 = 120;
+let perfSamples = [];
+
+function paint7() {
+  const cv = $('#a7');
+  const t0 = performance.now();
+  paintAscii(cv, c7, { ch: 13 });
+  const dt = performance.now() - t0;
+  perfSamples.push(dt);
+  if (perfSamples.length > 24) perfSamples.shift();
+  const avg = perfSamples.reduce((a, b) => a + b, 0) / perfSamples.length;
+  $('#perf').textContent = avg.toFixed(1) + ' ms';
+}
+
+/* ============================== 交互绑定 ============================== */
+
+function bindSeg(sel, apply) {
+  const host = $(sel);
+  host.addEventListener('click', e => {
+    const b = e.target.closest('button');
+    if (!b) return;
+    [...host.querySelectorAll('button')].forEach(x => x.classList.remove('on'));
+    b.classList.add('on');
+    apply(b.dataset.v);
+  });
+}
+
+bindSeg('#seg2', v => { mode2 = v; paint2(); });
+bindSeg('#seg5', v => { mode5 = v; });
+bindSeg('#seg6', v => { mode6 = v; });
+
+$('#c1').addEventListener('input', e => { c1 = +e.target.value; $('#o1').textContent = c1; });
+$('#c2').addEventListener('input', e => { c2 = +e.target.value; $('#o2').textContent = c2; });
+$('#c7').addEventListener('input', e => { c7 = +e.target.value; $('#o7').textContent = c7; });
+
+/* 滚动进度条 */
+addEventListener('scroll', () => {
+  const h = document.documentElement;
+  const p = h.scrollTop / Math.max(1, h.scrollHeight - h.clientHeight);
+  $('#prog').style.width = (p * 100).toFixed(2) + '%';
+}, { passive: true });
+
+/* ============================== 主循环 ============================== */
+
+let t = 0, last = 0, acc = 0;
+
+function loop(now) {
+  requestAnimationFrame(loop);
+  if (!last) { last = now; return; }
+  const dt = Math.min((now - last) / 1000, 0.1);
+  last = now;
+  acc += dt;
+  if (acc < 1 / 30) return;
+  acc = 0;
+  t += dt;
+
+  drawSource(t);
+
+  // 只渲染视口内的演示，滚出屏幕就跳过
+  const inView = el => {
+    const r = el.getBoundingClientRect();
+    return r.bottom > -160 && r.top < innerHeight + 160;
+  };
+
+  if (inView(a1src)) paint1();
+  if (inView($('#a2a'))) paint2();
+  if (inView($('#a3a'))) paint3();
+  if (inView($('#a4a'))) paint4();
+  if (inView($('#a5a'))) paint5();
+  if (inView($('#a6a'))) paint6(t);
+  if (inView($('#a7'))) paint7();
+}
+
+drawSource(0);
+buildRampViz();
+paint1(); paint2(); paint3(); paint4(); paint5(); paint6(0); paint7();
+requestAnimationFrame(loop);
+
+})();
+</script>
+</body>
+</html>
